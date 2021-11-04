@@ -134,7 +134,7 @@ class Representation:
         self.lang_enc = LangEncoder(0, 0)
         self.encoder = ResnetEncoder((3, 224, 224), finetune, pretrained, reshape=0, 
                             num_ims=1, size=size, lang_cond=lang_cond, 
-                            lang_enc=self.lang_enc, attntype=attntype).to(device)
+                            lang_enc=self.lang_enc).to(device)
         self.lang_pred = LangPredictor(self.encoder.repr_dim, hidden_dim, lang_enc=self.lang_enc, structured=structured).to(device)
         self.repr_dim = self.encoder.repr_dim
 
