@@ -8,10 +8,11 @@ defaults:
 save_snapshot: false
 load_snap: ""
 # replay buffer
-replay_buffer_size: 1000000
-replay_buffer_num_workers: 4
+replay_buffer_num_workers: 10
 nstep: 3
 batch_size: 32 #256
+train_steps: 1000000
+eval_freq: 10000
 # misc
 seed: 1
 device: cuda
@@ -21,12 +22,13 @@ use_tb: false
 # experiment
 experiment: train_rep_0929_sweep
 # agent
-lr: 1e-4
+lr: 1e-3
 feature_dim: 50
 # lowdim
 lowdim: 0
 # data
 alpha: 0.2
+dataset: "sthsth"
 
 
 agent:
@@ -38,7 +40,12 @@ agent:
   feature_dim: ${feature_dim}
   finetune: 1
   pretrained: 0
-  size: 18
-  l2weight: 0.01
-  smoothweight: 0.0
+  size: 34
+  l2weight: 0.00001
+  smoothweight: 1.0
+  langweight: 1.0
   structured: true
+  lang_cond: false
+  l2dist: true
+  # sanity check
+  gt: false
