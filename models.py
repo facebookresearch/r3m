@@ -170,8 +170,9 @@ class ResnetEncoder(nn.Module):
 class Representation:
     def __init__(self, device, lr, feature_dim,
                  hidden_dim, use_tb, finetune=1, pretrained=0, size=34, l2weight=1.0, 
-                 langweight=1.0, tcnweight=0.0, langrecweight=0.0, structured=False, lang_cond=False, 
-                 gt=False, l2dist=True, attntype="modulate", finetunelang=0, lsize=32, distributed=False, cpcweight = 0.0):
+                 langweight=1.0, tcnweight=0.0, structured=False, lang_cond=False, 
+                 gt=False, l2dist=True, attntype="modulate", finetunelang=0, lsize=32, 
+                 distributed=False, cpcweight = 0.0, num_same=1, langtype="reconstruct"):
 
         self.device = device
         self.use_tb = use_tb
@@ -179,27 +180,30 @@ class Representation:
         self.lang_cond = lang_cond
         self.tcnweight = tcnweight
         self.cpcweight = cpcweight
-        self.num_ims = 4
-        self.langrecweight = langrecweight
-        self.distributed = distributed
+        self.num_same = num_same
+        self.distributed = distributed ## Multi-GPU Training
         self.finetunelang = finetunelang
         self.gt = gt
         self.l2dist = l2dist
         self.attntype = attntype
+        self.langtype = langtype
         self.cs = torch.nn.CosineSimilarity(1)
         self.langweight = langweight
         self.lang_enc = LangEncoder(self.finetunelang, 0)
         self.encoder = ResnetEncoder((3, 224, 224), finetune, pretrained, reshape=0, 
                             num_ims=1, size=size, lang_cond=lang_cond, 
                             lang_enc=self.lang_enc, attntype=self.attntype, lsize=lsize).to(device)
-        # self.lang_pred = LangPredictor(self.encoder.repr_dim, hidden_dim, lang_enc=self.lang_enc, structured=structured).to(device)
-        self.rew_model = RewardModel(self.encoder.repr_dim, hidden_dim, self.lang_enc.lang_size).to(device)
+        
+        ## Types of language loss
+        if self.langtype == "reconstruct":
+            self.rew_model = RewardModel(self.encoder.repr_dim, hidden_dim, self.lang_enc.lang_size).to(device)
+        elif self.langtype == "lorel":
+            self.rew_model = RewardModel(self.encoder.repr_dim, hidden_dim, self.lang_enc.lang_size, disc=True).to(device)
+        elif self.langtype == "contrastive":
+            self.rew_model = LangPredictor(self.encoder.repr_dim, hidden_dim).to(device)
+
         self.bce = nn.BCELoss(reduce=False)
-
         self.repr_dim = self.encoder.repr_dim
-
-        if self.gt:
-            self.predictor = nn.Linear(self.encoder.repr_dim, 72).to(device)
 
         if self.distributed:
             self.encoder = torch.nn.DataParallel(self.encoder)
@@ -209,9 +213,9 @@ class Representation:
         if self.finetunelang:
             self.encoder_opt = torch.optim.Adam(list(self.encoder.parameters()) + list(self.lang_enc.parameters()) + list(self.rew_model.parameters()), lr=lr)
         else:
-            # optimizers
             self.encoder_opt = torch.optim.Adam(list(self.encoder.parameters()) + list(self.rew_model.parameters()), lr=lr)
 
+    ## Logging initial and final images and their language
     def log_data(self, b_im0, b_img, step, lang, eval):
         im_logging = []
         for i in range(8):
@@ -225,6 +229,7 @@ class Representation:
             for item in lang[:8]:
                 f.write("%s\n" % item)
 
+    ## Logging images used for TCN Loss
     def log_smooth_data(self, b_ims0, b_ims1, b_ims2, step, lang, eval):
         im_logging = []
         for i in range(8):
@@ -235,31 +240,14 @@ class Representation:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         save_image(ims_log, self.work_dir.joinpath(f"smoothim.png"))
 
+    ## Logging language predictions
     def log_lang(self, tensors, step, eval):
         e0, eg, preds = tensors
         with open(self.work_dir.joinpath(f"preds.txt"), 'w') as f:
             for item in preds.squeeze():
                 f.write("%s\n" % item)
-        # bs = 5
-        # true_preds = torch.diagonal(preds).permute(1,0)[:bs]
-        # false_preds = preds[:bs, :bs] 
-        # e0 = e0[:bs]
-        # eg = eg[:bs]
-        # al = torch.cat([e0, eg, true_preds, false_preds.reshape(bs*bs, -1)], 0)
-        # u, s, v = torch.pca_lowrank(al, q=2, niter=100)
-        # u = u.cpu().detach().numpy()
-        # u_0 = u[0:bs]
-        # u_g = u[bs:(2*bs)]
-        # u_fp = u[(3*bs):].reshape((bs, bs, 2))
-        # u_tp = u[(2*bs):(3*bs)]
-        # for j in range(bs):
-        #     plt.plot([u_0[j, 0], u_g[j, 0]], [u_0[j, 1], u_g[j, 1]], color="green", marker=".")
-        #     for k in range(bs):
-        #         plt.plot([u_0[j, 0], u_fp[j, k, 0]], [u_0[j, 1], u_fp[j, k, 1]], color="red", marker=".")
-        #     plt.plot([u_0[j, 0], u_tp[j, 0]], [u_0[j, 1], u_tp[j, 1]], color="blue", marker=".")
-        # plt.savefig(self.work_dir.joinpath(f"lang_pca.png"))
-        # plt.close()
 
+    ### Plotting TCN triplets in embedding space and attention mask
     def log_smooth(self, tensors, step, eval):
         e0, e1, e2, attn = tensors
         bs = 10
@@ -291,12 +279,10 @@ class Representation:
 
         ## Visualize Smoothness Data
         if smoothtensors is not None:
-            try:
-                self.log_smooth(smoothtensors, step, eval)
-            except:
-                pass
+            self.log_smooth(smoothtensors, step, eval)
             self.log_smooth_data(b_ims0, b_ims1, b_ims2, step, lang, eval)
 
+    ## Function for getting reward given language and initial/final states
     def get_reward(self, bim0, bims, lang):
         self.encoder.eval()
         self.rew_model.eval()
@@ -305,6 +291,7 @@ class Representation:
             context = lang * 2
         else:
             context = None
+
         bs = bim0.shape[0]
         bim = torch.stack([bim0, bims], 0)
         bim = bim.reshape(2*bs, 3, 224, 224)
@@ -314,16 +301,20 @@ class Representation:
         e0 = alle[0]
         es = alle[1]
 
-        preds = self.rew_model(e0, es)
-        rewloss = -F.mse_loss(ltrue[:bs], preds, reduce=False).mean(-1)
-        return rewloss, att
+        if ltrue is None:
+            ltrue = self.lang_enc(lang)
 
-        goals = self.lang_pred(e0, lang)
-        if self.l2dist:
-            sim = - torch.linalg.norm(goals - es, dim = -1) # torch.sqrt(((es2 - es0)**2).mean(-1))
-        else:
-            sim = self.cs(goals, es) 
-        return sim, att
+
+        if self.langtype == "reconstruct":
+            preds = self.rew_model(e0, es)
+            rew = -F.mse_loss(ltrue[:bs], preds, reduce=False).mean(-1)
+        elif self.langtype == "lorel":
+            rew = self.rew_model(e0, es, ltrue)
+        elif self.langtype == "contrastive":
+            goals = self.rew_model(e0, ltrue)
+            rew = self.sim(goals, es)
+
+        return rew, att
 
     def sim(self, tensor1, tensor2):
         if self.l2dist:
@@ -361,7 +352,7 @@ class Representation:
         bim = bim.reshape(5*bs, 3, 224, 224)
         contextlist = torch.tensor(range(0, bs*5))
         alle, out = self.encoder(bim, context, contextlist)
-        att, lpred, ltrue = out
+        att, _, ltrue = out
         alle = alle.reshape(5, bs, -1)
         e0 = alle[0]
         eg = alle[1]
@@ -377,130 +368,83 @@ class Representation:
         metrics['l1loss'] = l1loss.item()
         full_loss += self.l2weight * l1loss
  
-        ## Language Mask loss
-        if (self.langrecweight > 0) and (self.lang_cond):
-            langrecloss = torch.linalg.norm(ltrue-lpred)
-            metrics['langrecloss'] = langrecloss.item()
-            full_loss += self.langrecweight * langrecloss
-
-        if self.gt:
-            assert(self.langweight == 0)
-            assert(self.tcnweight == 0)
-            assert(not self.lang_cond)
-            es1, attns1 = self.encoder(b_s1, context)
-            pred = self.predictor(es1)
-            mse_loss =  F.mse_loss(b_lang.float().cuda(), pred)
-            metrics['mseloss'] = mse_loss.item()
-            full_loss += 1.0 * mse_loss
-        else:
-            assert((self.langweight + self.tcnweight) > 0)
-
 
         t3 = time.time()
+        ## Language Predictive Loss
         if self.langweight > 0:
             assert(not self.gt)
-            # assert(not self.lang_cond)
-            ## Do language prediction for each instruction
-            # e0r = e0.repeat(bs, 1)
-            # langsr = np.repeat(b_lang, bs)
-            # preds = self.lang_pred(e0r, langsr).reshape((bs, bs, self.repr_dim))
+
+            nltrue = None
             if ltrue is None:
                 ltrue = self.lang_enc(b_lang)
-            preds = self.rew_model(e0, eg)
-            rewloss = F.mse_loss(ltrue[:bs], preds)
-            metrics['rewloss'] = rewloss.item()
-            #### LOREL
-            # b_lang_shuf = copy.deepcopy(b_lang)
-            # random.shuffle(b_lang_shuf)
-            # context_shuf = b_lang_shuf * 2
-            # contextlist_shuf = torch.tensor(range(0, bs*2))
-            # bimneg = torch.cat([b_im0, b_img], 0)
-            # alle_neg, nout = self.encoder(bimneg, context_shuf, contextlist_shuf)
-            # _, _, nltrue = nout
-            # alle_neg = alle_neg.reshape(2, bs, -1)
-            # en0 = alle_neg[0]
-            # eng = alle_neg[1]
-            
 
-            # pos = self.rew_model(e0, eg, ltrue[:bs])
-            # neg = self.rew_model(en0, eng, nltrue[:bs])
-            # neg2 = self.rew_model(eg, e0, ltrue[:bs])
+            if self.langtype == "contrastive":
+                b_lang_shuf = copy.deepcopy(ltrue)
+                random.shuffle(b_lang_shuf)
+                if nltrue is None:
+                    nltrue = self.lang_enc(b_lang_shuf)
 
-            # labels_pos = torch.ones(bs, 1).cuda()
-            # labels_neg = torch.zeros(bs*2, 1).cuda()
-            # preds = torch.cat([pos, neg, neg2], 0)
-            # labels = torch.cat([labels_pos, labels_neg], 0)
-            # rewloss = self.bce(preds, labels).mean()
-            
-            # rewacc = (((1 * (preds > 0.5)) == labels) * 1.0).mean().cpu().detach().numpy()
-            # rewprec, rewrec, _, _ = sklearn.metrics.precision_recall_fscore_support(labels.cpu().detach().numpy(), 
-            #                                 (1 * (preds > 0.5)).cpu().detach().numpy(), zero_division=0)
-            # metrics['rewloss'] = rewloss.item()
-            # metrics['rewacc'] = rewacc.item()
-            # metrics['rewprec'] = rewprec.mean().item()
-            # metrics['rewrec'] = rewrec.mean().item()
+                preds = self.rew_model(e0, b_lang)
+                preds_n = self.rew_model(e0, b_lang_shuf)
 
-            ### OLD LANG PRED 
-            # t = True
-            # if t:
-            #     preds = self.lang_pred(e0, b_lang)
-            #     if self.l2dist:
-            #         sim_0_g = - torch.linalg.norm(preds - es0, dim = -1) # torch.sqrt(((es2 - es0)**2).mean(-1))
-            #         sim_1_g = - torch.linalg.norm(preds - es1, dim = -1) #torch.sqrt(((es2 - es1)**2).mean(-1))
-            #         sim_2_g = - torch.linalg.norm(preds - es2, dim = -1) #torch.sqrt(((es1 - es0)**2).mean(-1))
-            #     else:
-            #         sim_0_g = self.cs(preds, es0) 
-            #         sim_1_g = self.cs(preds, es1)
-            #         sim_2_g = self.cs(preds, es2)
-            #     langloss = -torch.log(epsilon + (torch.exp(sim_2_g) / (epsilon + torch.exp(sim_2_g) + torch.exp(sim_1_g) + torch.exp(sim_0_g)))).mean()
-            #     lacc = ((1.0 * (sim_1_g < sim_2_g)) * (1.0 * (sim_0_g < sim_2_g))).mean()
-            # else:
-            #     b_lang_shuf = copy.deepcopy(b_lang)
-            #     preds = self.lang_pred(e0, b_lang)
-            #     preds_n = self.lang_pred(e0, b_lang_shuf)
-            #     if self.l2dist:
-            #         sim_0 = - torch.linalg.norm(preds - e0, dim = -1) # torch.sqrt(((es2 - es0)**2).mean(-1))
-            #         sim_n = - torch.linalg.norm(preds - preds_n, dim = -1) #torch.sqrt(((es2 - es1)**2).mean(-1))
-            #         sim_g = - torch.linalg.norm(preds - eg, dim = -1) #torch.sqrt(((es1 - es0)**2).mean(-1))
-            #     else:
-            #         sim_0 = self.cs(preds, e0) 
-            #         sim_n = self.cs(preds, preds_n)
-            #         sim_g = self.cs(preds, eg)
-            #     langloss = -torch.log(epsilon + (torch.exp(sim_g) / (epsilon + torch.exp(sim_0) + torch.exp(sim_n) + torch.exp(sim_g)))).mean()
-            #     lacc = ((1.0 * (sim_0 < sim_g)) * (1.0 * (sim_n < sim_g))).mean()
-            # metrics['langloss'] = langloss.item()
-            # metrics['lacc'] = lacc.item()
-            # metrics['sim_s0_s2'] = sim_0_2.mean().item()
-            # metrics['sim_s1_s2'] = sim_1_2.mean().item()
-            # metrics['sim_s0_s1'] = sim_0_1.mean().item()
+                sim_0 = self.sim(preds, e0) 
+                sim_n = self.sim(preds, preds_n)
+                sim_g = self.sim(preds, eg)
 
-            ## Compute Language CPC Loss
-            # emb_g = eg.unsqueeze(1).repeat(1, bs, 1)
-            # sims = - torch.linalg.norm(preds - emb_g, dim=-1)
-            # sims_e = torch.exp(sims)
-            # loss_neglang = -torch.log(torch.diagonal(sims_e) / sims_e.sum(1)).mean()
-            
-            # true_cls = torch.LongTensor(range(0 , bs)).cuda()
-            # a = utils.accuracy(sims_e, true_cls, (1, 5))
-            # metrics['numerator'] = torch.diagonal(sims_e).mean().item()
-            # metrics['lang_accuracy1'] = a[0]
-            # metrics['lang_accuracy5'] = a[1]
-            # metrics['loss_lang'] = loss_neglang.item()
-            # metrics['denomerator'] = sims_e.sum(1).mean().item()
+                rewloss = -torch.log(epsilon + (torch.exp(sim_g) / (epsilon + torch.exp(sim_0) + torch.exp(sim_n) + torch.exp(sim_g)))).mean()
+                lacc = ((1.0 * (sim_0 < sim_g)) * (1.0 * (sim_n < sim_g))).mean()
+                metrics['rewloss'] = rewloss.item()
+                metrics['rewacc'] = lacc.item()
+            elif self.langtype == "lorel":
+                b_lang_shuf = copy.deepcopy(b_lang)
+                random.shuffle(b_lang_shuf)
+                context_shuf = b_lang_shuf * 2
+                contextlist_shuf = torch.tensor(range(0, bs*2))
+                bimneg = torch.cat([b_im0, b_img], 0)
+                alle_neg, nout = self.encoder(bimneg, context_shuf, contextlist_shuf)
+                _, _, nltrue = nout
+                alle_neg = alle_neg.reshape(2, bs, -1)
+                en0 = alle_neg[0]
+                eng = alle_neg[1]
+                
+
+                pos = self.rew_model(e0, eg, ltrue[:bs])
+                neg = self.rew_model(en0, eng, nltrue[:bs])
+                neg2 = self.rew_model(eg, e0, ltrue[:bs])
+
+                labels_pos = torch.ones(bs, 1).cuda()
+                labels_neg = torch.zeros(bs*2, 1).cuda()
+                preds = torch.cat([pos, neg, neg2], 0)
+                labels = torch.cat([labels_pos, labels_neg], 0)
+                rewloss = self.bce(preds, labels).mean()
+                
+                rewacc = (((1 * (preds > 0.5)) == labels) * 1.0).mean().cpu().detach().numpy()
+                rewprec, rewrec, _, _ = sklearn.metrics.precision_recall_fscore_support(labels.cpu().detach().numpy(), 
+                                                (1 * (preds > 0.5)).cpu().detach().numpy(), zero_division=0)
+                metrics['rewloss'] = rewloss.item()
+                metrics['rewacc'] = rewacc.item()
+                metrics['rewprec'] = rewprec.mean().item()
+                metrics['rewrec'] = rewrec.mean().item()
+            elif self.langtype == "reconstruct":
+                preds = self.rew_model(e0, eg)
+                rewloss = F.mse_loss(ltrue[:bs], preds)
+                metrics['rewloss'] = rewloss.item()
+
             full_loss += self.langweight * rewloss
             langstuff = (e0, eg, preds)
 
+        ## Cross Video Contrative Loss
         if self.cpcweight > 0:
             sim_0_2 = self.sim(es2, es0) 
 
             p_s = []
             n_s = []
-            for k in range(0, bs, self.num_ims):
-                subbatch = es0[k:(k+self.num_ims)]
+            for k in range(0, bs, self.num_same):
+                subbatch = es0[k:(k+self.num_same)]
                 pos_s = sim_0_2[k]
                 p_s.append(pos_s)
                 neg_s = []
-                for sb in range(1, self.num_ims):
+                for sb in range(1, self.num_same):
                     neg_s.append(self.sim(es0[0].unsqueeze(0), es0[sb].unsqueeze(0)))
                 neg_s = torch.cat(neg_s)
                 n_s.append(neg_s)
@@ -513,17 +457,14 @@ class Representation:
             metrics['cpcacc'] = cpcacc.item()
             full_loss += self.cpcweight * cpcloss
 
+        ## Within Video TCN Loss
         t4 = time.time()
         if self.tcnweight > 0:
             assert(not self.gt)
-            ## Compute smoothness loss, initial/final CPC Loss
             sim_0_2 = self.sim(es2, es0) 
             sim_1_2 = self.sim(es2, es1)
             sim_0_1 = self.sim(es1, es0)
 
-            # true_preds = torch.diagonal(preds).permute(1,0)
-            # sim_g = - torch.sqrt(((true_preds - eg)**2).mean(-1))
-            # sim_0 = - torch.sqrt(((true_preds - e0)**2).mean(-1))
             smoothloss1 = -torch.log(epsilon + (torch.exp(sim_1_2) / (epsilon + torch.exp(sim_0_2) + torch.exp(sim_1_2))))
             smoothloss2 = -torch.log(epsilon + (torch.exp(sim_0_1) / (epsilon + torch.exp(sim_0_1) + torch.exp(sim_0_2))))
             smoothloss = ((smoothloss1 + smoothloss2) / 2.0).mean()
@@ -586,30 +527,17 @@ class LangEncoder(nn.Module):
     return lang_embedding
 
 class LangPredictor(nn.Module):
-    def __init__(self, feature_dim, hidden_dim, lang_enc, structured=False):
+    def __init__(self, feature_dim, hidden_dim):
         super().__init__()
-        self.lang_enc = lang_enc
-        self.structured = structured
-        print(feature_dim+self.lang_enc.lang_size)
-        if structured:
-            self.pred = nn.Sequential(nn.Linear(self.lang_enc.lang_size, hidden_dim),
-                                    nn.ReLU(inplace=True),
-                                    nn.Linear(hidden_dim, feature_dim))
-        else:
-            self.pred = nn.Sequential(nn.Linear(feature_dim+self.lang_enc.lang_size, hidden_dim),
-                                    nn.ReLU(inplace=True),
-                                    nn.Linear(hidden_dim, hidden_dim),
-                                    nn.ReLU(inplace=True),
-                                    nn.Linear(hidden_dim, feature_dim))
+        self.pred = nn.Sequential(nn.Linear(feature_dim+self.lang_enc.lang_size, hidden_dim),
+                                nn.ReLU(inplace=True),
+                                nn.Linear(hidden_dim, hidden_dim),
+                                nn.ReLU(inplace=True),
+                                nn.Linear(hidden_dim, feature_dim))
         
-    def forward(self, emb, lang):
-        if self.structured:
-            lang_emb = self.pred(self.lang_enc(lang))
-            emb_pred = emb + lang_emb
-        else:
-            lang_emb = self.lang_enc(lang)
-            embin = torch.cat([emb, lang_emb], -1)
-            emb_pred = self.pred(embin)
+    def forward(self, emb, lang_emb):
+        embin = torch.cat([emb, lang_emb], -1)
+        emb_pred = self.pred(embin)
         return emb_pred
 
 class RewardModel(nn.Module):

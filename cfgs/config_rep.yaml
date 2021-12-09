@@ -47,7 +47,6 @@ agent:
   tcnweight: 1.0
   cpcweight: 1.0
   langweight: 0.0
-  langrecweight: 0.0
   structured: true
   lang_cond: false
   l2dist: true
@@ -57,3 +56,5 @@ agent:
   finetunelang: false
   lsize: 32
   distributed: false
+  num_same: ${num_same}
+  langtype: reconstruct
