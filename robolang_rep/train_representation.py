@@ -19,7 +19,7 @@ import torch
 from torchvision import transforms
 from torch.utils.data import IterableDataset
 import pandas as pd
-import utils
+from robolang_rep import utils
 from logger import Logger
 import json
 import time

@@ -34,7 +34,7 @@ wandbproject: drq_rep
 
 
 agent:
-  _target_: models.Representation
+  _target_: robolang_rep.Representation
   device: ${device}
   lr: ${lr}
   use_tb: ${use_tb}
