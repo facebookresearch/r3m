@@ -13,7 +13,6 @@ nstep: 3
 batch_size: 32 #256
 train_steps: 1000000
 eval_freq: 20000
-num_same: 1
 # misc
 seed: 1
 device: cuda
@@ -23,15 +22,14 @@ use_tb: false
 # experiment
 experiment: train_rep_0929_sweep
 # agent
-lr: 1e-4
+lr: 1e-3
 feature_dim: 50
 # lowdim
 lowdim: 0
 # data
 alpha: 0.2
-dataset: "sthsth"
-wandbproject: drq_rep
-
+wandbproject: reward_viz
+dataset: gt
 
 agent:
   _target_: models.Representation

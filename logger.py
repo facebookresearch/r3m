@@ -134,7 +134,7 @@ class Logger(object):
         if use_tb:
             self._sw = SummaryWriter(str(log_dir / 'tb'))
         else:
-            wandb.init(project='drq_rep', entity='surajnfb', name=cfg.experiment)
+            wandb.init(project=cfg.wandbproject, entity='surajnfb', name=cfg.experiment)
             fullcfg = {**cfg, **cfg.agent}
             # wandb.config.update(cfg)
             wandb.config.update(fullcfg)

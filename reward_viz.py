@@ -12,6 +12,7 @@ os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
 os.environ['MUJOCO_GL'] = 'egl'
 
 from pathlib import Path
+from torchvision.utils import save_image
 
 import hydra
 import numpy as np
@@ -28,7 +29,7 @@ from torchvision.utils import save_image
 import json
 import random
 import av
-
+import copy
 torch.backends.cudnn.benchmark = True
 
 
@@ -37,23 +38,15 @@ def make_network(cfg):
 
 ## Data Loader for Ego4D
 class Ego4DBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, num_same=1):
+    def __init__(self, num_workers, source1, source2, alpha):
         self._num_workers = max(1, num_workers)
         self.alpha = alpha
-        self.num_same = num_same
-        self.curr_same = 0
 
         # Augmentations
-        # self.aug = torch.nn.Sequential(
-        #         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-        #         transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-        #     )
-
         self.aug = torch.nn.Sequential(
-                transforms.Resize(256),
-                transforms.RandomCrop(224),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
             )
-
 
         # Load Data
         print("Ego4D")
@@ -63,40 +56,21 @@ class Ego4DBuffer(IterableDataset):
 
     def _sample(self):
         t0 = time.time()
-        if self.curr_same % self.num_same == 0:
-            parentvid = np.random.randint(0, self.mlen)
-            parentm = self.manifest.iloc[parentvid]
-            path = parentm["path"]
-
-            vidsp = path.split("/")[:-2]
-            self.vidsp = "/".join(vidsp)
-
-            scl = [self.vidsp in p for p in self.manifest["path"]]
-            self.num_subclips = np.sum(scl)
-            self.subclips = self.manifest.loc[scl]
-
-        vid = np.random.randint(0, self.num_subclips)
-        m = self.subclips.iloc[vid]
-        vidlen = m["len"]
+        vidlen = 0
+        while not ((vidlen > 80) and (vidlen < 100)):
+            vid = np.random.randint(0, self.mlen)
+            m = self.manifest.iloc[vid]
+            vidlen = m["len"]
         txt = m["txt"]
         txt = txt[2:]
         path = m["path"]
 
-        start_ind = np.random.randint(1, 2 + int(self.alpha * vidlen))
-        end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
-        im0 = self.aug(torchvision.io.read_image(f"{path}/{start_ind:06}.jpg") / 255.0) * 255.0
-        img = self.aug(torchvision.io.read_image(f"{path}/{end_ind:06}.jpg") / 255.0) * 255.0
-
-        s1_ind = np.random.randint(2, vidlen)
-        s0_ind = np.random.randint(1, s1_ind)
-        s2_ind = np.random.randint(s1_ind, vidlen+1)
-        imts0 = self.aug(torchvision.io.read_image(f"{path}/{s0_ind:06}.jpg") / 255.0) * 255.0
-        imts1 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
-        imts2 = self.aug(torchvision.io.read_image(f"{path}/{s2_ind:06}.jpg") / 255.0) * 255.0
-
-        self.curr_same += 1
+        ims = []
+        for i in range(80):
+            ims.append(torchvision.io.read_image(f"{path}/{i:06}.jpg"))
+        ims = torch.stack(ims)
         label = txt
-        return (im0, img, imts0, imts1, imts2, label)
+        return (ims, label)
 
     def __iter__(self):
         while True:
@@ -174,6 +148,10 @@ class GTBuffer(IterableDataset):
         s2_ind = np.random.randint(s1_ind, vidlen)
         video = torch.FloatTensor(ims).permute(0, 3, 1, 2)
 
+        video_p = self.preprocess(video / 255.0 ) * 255.0
+        label = self.all_labels[vid]
+        return (video_p, label)
+
         im0 = self.aug(self.preprocess(video[start_ind]) / 255.0 ) * 255.0
         img = self.aug(self.preprocess(video[end_ind]) / 255.0 ) * 255.0
         imts0 = self.aug(self.preprocess(video[s0_ind]) / 255.0 ) * 255.0
@@ -191,58 +169,6 @@ class GTBuffer(IterableDataset):
             yield self._sample()
 
 
-## Data Loader for SthSth Data
-class VideoBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha):
-        self._num_workers = max(1, num_workers)
-        self.alpha = alpha
-        self.source = source1
-        
-        # Preprocess
-        self.preprocess = torch.nn.Sequential(
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                )
-
-        ## Augment when training
-        if self.source == "train":
-            self.aug = torch.nn.Sequential(
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-                    transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-                )
-        else:
-            self.aug = lambda a : a
-
-        # Load Data
-        self.dt = pd.read_csv(f"/datasets01/SSV2/{source1}.csv", sep=" ")
-        self.labels = {}
-        f = open(f"/datasets01/SSV2/something-something-v2-{source2}.json")
-        for label in json.load(f):
-            self.labels[label["id"]] = label["label"]
-
-    def _sample(self):
-        vid = np.random.choice(self.dt["original_vido_id"])
-        vidlen = self.dt.loc[self.dt["original_vido_id"] == vid]["frame_id"].max()
-        start_ind = np.random.randint(1, 2 + int(self.alpha * vidlen))
-        end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
-        im0 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{start_ind:06}.jpg')) / 255.0) * 255.0
-        img = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{end_ind:06}.jpg')) / 255.0) * 255.0
-
-        s1_ind = np.random.randint(2, vidlen)
-        s0_ind = np.random.randint(1, s1_ind)
-        s2_ind = np.random.randint(s1_ind, vidlen+1)
-        imts0 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s0_ind:06}.jpg')) / 255.0) * 255.0
-        imts1 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s1_ind:06}.jpg')) / 255.0) * 255.0
-        imts2 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s2_ind:06}.jpg')) / 255.0) * 255.0
-
-        label = self.labels[str(vid)]
-        return (im0, img, imts0, imts1, imts2, label)
-
-    def __iter__(self):
-        while True:
-            yield self._sample()
-
-
 class Workspace:
     def __init__(self, cfg):
         self.work_dir = Path.cwd()
@@ -253,11 +179,10 @@ class Workspace:
         self.device = torch.device(cfg.device)
         self.setup()
 
-        print("Creating Dataloader")
         if self.cfg.dataset == "ego4d":
-            train_iterable = Ego4DBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha, num_same=self.cfg.num_same)
+            train_iterable = Ego4DBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha)
             ## Ego4D Val set is WIP
-            # val_iterable = train_iterable
+            val_iterable = train_iterable
         elif self.cfg.dataset == "gt":
             shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
             train_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
@@ -265,19 +190,12 @@ class Workspace:
             alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
             val_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "val", "validation",
                      alpha=0, shuf = shuf, gt = self.cfg.agent.gt, alldata=alldata)
-        else:
-            train_iterable = VideoBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha)
-            val_iterable = VideoBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", alpha=0)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
                                          num_workers=self.cfg.replay_buffer_num_workers,
                                          pin_memory=True))
-        if self.cfg.dataset == "ego4d":
-            ## Ego4D Val set is WIP
-            self.val_loader = self.train_loader
-        else:
-            self.val_loader = iter(torch.utils.data.DataLoader(val_iterable,
+        self.val_loader = iter(torch.utils.data.DataLoader(val_iterable,
                                          batch_size=self.cfg.batch_size,
                                          num_workers=self.cfg.replay_buffer_num_workers,
                                          pin_memory=True))
@@ -322,39 +240,51 @@ class Workspace:
         # predicates
         train_until_step = utils.Until(self.cfg.train_steps,
                                        1)
-        eval_freq = self.cfg.eval_freq
-        eval_every_step = utils.Every(eval_freq,
-                                      1)
-        self.model.eval_freq = eval_freq
 
         ## Training Loop
         print("Begin Training")
         while train_until_step(self.global_step):
             ## Sample Batch
             t0 = time.time()
-            batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.train_loader)
+            batch_vids, batch_langs = next(self.val_loader)
+            batch_langs_shuf = copy.deepcopy(batch_langs)
+            random.shuffle(batch_langs_shuf)
+            batch_vids = batch_vids.cuda()
             t1 = time.time()
-            batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
-                    batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-            metrics = self.model.update(batch, self.global_step)
-            t2 = time.time()
-            self.logger.log_metrics(metrics, self.global_frame, ty='train')
-
-            if self.global_step % 10 == 0:
-                print(self.global_step, metrics)
-                print(f'Sample time {t1-t0}, Update time {t2-t1}')
-                
-            if eval_every_step(self.global_step):
+            
+            rs= []
+            rns = []
+            for ts in range(0, batch_vids.shape[1]):
+                metric = {}
                 with torch.no_grad():
-                    batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.val_loader)
-                    batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
-                            batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-                    metrics = self.model.update(batch, self.global_step, eval=True)
-                    self.logger.log_metrics(metrics, self.global_frame, ty='eval')
-                    print("EVAL", self.global_step, metrics)
+                    r, a = self.model.get_reward(batch_vids[:, 0], batch_vids[:, ts], batch_langs)
+                    r_n, an = self.model.get_reward(batch_vids[:, 0], batch_vids[:, ts], batch_langs_shuf)
+                print(r, r_n)
+                metric["rew_pos"] = r.mean()
+                metric["rew_neg"] = r_n.mean()
+                rs.append(r.cpu().detach().numpy())
+                rns.append(r_n.cpu().detach().numpy())
+                self.logger.log_metrics(metric, ts, ty='train')
+            rs = np.stack(rs, -1)
+            rns = np.stack(rns, -1)
 
-                    self.save_snapshot()
+            for b in range(batch_vids.shape[0]):
+                filename = self.work_dir.joinpath(f"{b}_dem_{self.global_step}.gif")
+                from moviepy.editor import ImageSequenceClip
+                clip = ImageSequenceClip(list(batch_vids[b].permute(0, 2, 3, 1).cpu().detach().numpy().astype(np.uint8)), fps=20)
+                clip.write_gif(filename, fps=20)
+
+                import matplotlib.pyplot as plt
+                plt.plot(rs[b], label=batch_langs[b])
+                plt.plot(rns[b], label=batch_langs_shuf[b])
+                plt.legend()
+                plt.savefig(self.work_dir.joinpath(f"{b}_rew_{self.global_step}.png"))
+                plt.close()
+            print(a.shape, an.shape)
+            save_image(a * 255.0, self.work_dir.joinpath(f"pos_a_{self.global_step}.png"))
+            save_image(an * 255.0, self.work_dir.joinpath(f"neg_a_{self.global_step}.png"))
             self._global_step += 1
+            assert(False)
 
     def save_snapshot(self):
         snapshot = self.work_dir / f'snapshot_{self.global_step}.pt'
@@ -390,9 +320,9 @@ class Workspace:
         except:
             print("No global step found")
 
-@hydra.main(config_path='cfgs', config_name='config_rep')
+@hydra.main(config_path='cfgs', config_name='config_rew_viz')
 def main(cfg):
-    from train_representation import Workspace as W
+    from reward_viz import Workspace as W
     root_dir = Path.cwd()
     workspace = W(cfg)
     snapshot = root_dir / 'snapshot.pt'

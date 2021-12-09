@@ -1,0 +1,7 @@
+ 
+ 
+ python reward_viz.py hydra/launcher=local hydra/output=local agent.smoothweight=1.0 agent.langweight=1.0 agent.size=34 experiment=vizrew agent.lang_cond=false agent.attntype="sigmoid" agent.finetunelang=0 load_snap="/checkpoint/surajn/drqoutput/train_representation/2021-11-19_12-07-59/18_agent.attntype\=sigmoid\,agent.finetunelang\=0\,agent.lang_cond\=False\,agent.langweight\=1.0\,agent.size\=34\,dataset\=ego4d\,experiment\=train_rep_1119_4/snapshot_920000.pt"
+ 
+ python reward_viz.py hydra/launcher=local hydra/output=local agent.smoothweight=1.0 agent.langweight=1.0 agent.size=34 experiment=vizrew agent.lang_cond=true agent.attntype="modulate" agent.finetunelang=0 load_snap="/checkpoint/surajn/drqoutput/train_representation/2021-11-19_12-07-59/20_agent.attntype\=modulate\,agent.finetunelang\=0\,agent.lang_cond\=True\,agent.langweight\=1.0\,agent.size\=34\,dataset\=ego4d\,experiment\=train_rep_1119_4/snapshot_940000.pt"
+
+ python reward_viz.py hydra/launcher=local hydra/output=local agent.smoothweight=1.0 agent.langweight=1.0 agent.size=34 experiment=vizrew agent.lang_cond=true agent.attntype="sigmoid" agent.finetunelang=0 load_snap="/checkpoint/surajn/drqoutput/train_representation/2021-11-19_12-07-59/22_agent.attntype\=sigmoid\,agent.finetunelang\=0\,agent.lang_cond\=True\,agent.langweight\=1.0\,agent.size\=34\,dataset\=ego4d\,experiment\=train_rep_1119_4/snapshot_840000.pt"
