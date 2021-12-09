@@ -13,7 +13,8 @@ from torch.nn.modules.linear import Identity
 import torchvision
 from torchvision import transforms
 from transformers import AutoTokenizer, AutoModel, AutoConfig
-import utils
+# import utils
+from robolang_rep import utils
 import random
 from pathlib import Path
 from torchvision.utils import save_image
