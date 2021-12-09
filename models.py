@@ -200,7 +200,7 @@ class Representation:
         elif self.langtype == "lorel":
             self.rew_model = RewardModel(self.encoder.repr_dim, hidden_dim, self.lang_enc.lang_size, disc=True).to(device)
         elif self.langtype == "contrastive":
-            self.rew_model = LangPredictor(self.encoder.repr_dim, hidden_dim).to(device)
+            self.rew_model = LangPredictor(self.encoder.repr_dim, hidden_dim, self.lang_enc.lang_size).to(device)
 
         self.bce = nn.BCELoss(reduce=False)
         self.repr_dim = self.encoder.repr_dim
@@ -379,13 +379,13 @@ class Representation:
                 ltrue = self.lang_enc(b_lang)
 
             if self.langtype == "contrastive":
-                b_lang_shuf = copy.deepcopy(ltrue)
+                b_lang_shuf = copy.deepcopy(b_lang)
                 random.shuffle(b_lang_shuf)
                 if nltrue is None:
                     nltrue = self.lang_enc(b_lang_shuf)
 
-                preds = self.rew_model(e0, b_lang)
-                preds_n = self.rew_model(e0, b_lang_shuf)
+                preds = self.rew_model(e0, ltrue[:bs])
+                preds_n = self.rew_model(e0, nltrue[:bs])
 
                 sim_0 = self.sim(preds, e0) 
                 sim_n = self.sim(preds, preds_n)
@@ -403,6 +403,8 @@ class Representation:
                 bimneg = torch.cat([b_im0, b_img], 0)
                 alle_neg, nout = self.encoder(bimneg, context_shuf, contextlist_shuf)
                 _, _, nltrue = nout
+                if nltrue is None:
+                    nltrue = self.lang_enc(b_lang_shuf)
                 alle_neg = alle_neg.reshape(2, bs, -1)
                 en0 = alle_neg[0]
                 eng = alle_neg[1]
@@ -471,9 +473,6 @@ class Representation:
             a_state = ((1.0 * (sim_0_2 < sim_1_2)) * (1.0 * (sim_0_1 > sim_0_2))).mean()
             metrics['tcnloss'] = smoothloss.item()
             metrics['aligned'] = a_state.item()
-            metrics['sim_s0_s2'] = sim_0_2.mean().item()
-            metrics['sim_s1_s2'] = sim_1_2.mean().item()
-            metrics['sim_s0_s1'] = sim_0_1.mean().item()
             full_loss += self.tcnweight * smoothloss
             smoothstuff = (es0, es1, es2, att)
 
@@ -527,9 +526,9 @@ class LangEncoder(nn.Module):
     return lang_embedding
 
 class LangPredictor(nn.Module):
-    def __init__(self, feature_dim, hidden_dim):
+    def __init__(self, feature_dim, hidden_dim, lang_dim):
         super().__init__()
-        self.pred = nn.Sequential(nn.Linear(feature_dim+self.lang_enc.lang_size, hidden_dim),
+        self.pred = nn.Sequential(nn.Linear(feature_dim+lang_dim, hidden_dim),
                                 nn.ReLU(inplace=True),
                                 nn.Linear(hidden_dim, hidden_dim),
                                 nn.ReLU(inplace=True),
