@@ -40,12 +40,14 @@ class ResnetEncoder(nn.Module):
         self.lsize = lsize
         self.attntype = attntype
         self.proprio_shape = proprio_shape
+        self.finetune = finetune
+
         if size in [18, 34]:
             self.output_dim = 512
         elif size == 50:
             self.output_dim = 2048
         self.repr_dim = self.output_dim * num_ims + proprio_shape
-        self.finetune = finetune
+        
         if reshape:
             self.preprocess = nn.Sequential(
                         transforms.Resize(256),
@@ -63,15 +65,16 @@ class ResnetEncoder(nn.Module):
             self.convnet = torchvision.models.resnet34(pretrained=pretrained)
         elif size == 50:
             self.convnet = torchvision.models.resnet50(pretrained=pretrained)
+
         self.convnet.fc = Identity()
         if self.finetune:
             self.convnet.train()
         else:
             self.convnet.eval()
 
+        ### IF REPRESENTATION IS LANGUAGE CONDITIONED
         if self.lang_cond:
             self.lang_enc = lang_enc
-            self.heads = 1
             if (self.attntype == "modulate") or (self.attntype == "modulatesigm"):
                 self.lang_enc_2 = nn.Linear(self.lang_enc.lang_size, self.output_dim)
             elif (self.attntype == "sigmoid") or (self.attntype == "fc"):
@@ -84,78 +87,70 @@ class ResnetEncoder(nn.Module):
                 self.convnet.conv1 = nn.Conv2d(3 + self.lsize, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
                 self.lang_enc_2 = nn.Linear(self.lang_enc.lang_size, self.lsize)
             elif (self.attntype == "mh"):
+                self.heads = 1 ## One head scaled dot product attention
                 self.attn = torch.nn.MultiheadAttention(self.heads, self.heads, batch_first=True)
                 self.lang_enc_2 = nn.Linear(self.lang_enc.lang_size, self.output_dim)
-
-
-            self.lang_rec = nn.Sequential(nn.Linear(self.output_dim, self.output_dim),
-                        nn.ReLU(inplace=True),
-                        nn.Linear(self.output_dim, self.lang_enc.lang_size))
             self.sigm = Sigmoid()
-            # self.attn = nn.Linear(self.lang_enc.lang_size + self.output_dim, self.output_dim*self.heads)
-            # self.attn = nn.Sequential(nn.Linear(self.lang_enc.lang_size + self.output_dim, self.output_dim),
-            #                         nn.ReLU(inplace=True),
-            #                         nn.Linear(self.output_dim, self.output_dim*self.heads))
 
         if not pretrained:
             self.apply(utils.weight_init)
 
     def encode(self, image, sentences=None):
+        ## If early fusion
         if (self.lang_cond) and (self.attntype == "ef"):
+            ## Encode sentences to lower dim
             le = self.lang_enc_2(self.lang_enc(sentences))
             le = le.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, image.shape[2], image.shape[3]) 
+            ## Stack channelwise and encode
             image_c = torch.cat([image, le], 1)
             e = self.convnet(image_c).squeeze()
             return e, (None, None, None)
 
+        ### Encode with Resnet
         e = self.convnet(image).squeeze(-1).squeeze(-1)
         a = None
         lpred, ltrue = None, None
+        ## If language conditioned
         if self.lang_cond:
-            # l_t = self.lang_enc_2(self.lang_enc(sentences))
-            # e_res = e.unsqueeze(-1) #.repeat(1, 1, self.heads)
-            # l_res = l_t.unsqueeze(-1) #.repeat(1, 1, self.heads)
-            # e, a = self.attn(l_res, e_res, e_res)
-            # e = e.mean(-1)
-
-            # a = self.attn(torch.cat([self.lang_enc(sentences), e], -1))
-            # a = a.reshape(a.shape[0], self.heads, self.output_dim)
-            # a = F.softmax(a, dim=-1)
-            # att = a.sum(-2)
-            # att = a
-            
             ltrue = self.lang_enc(sentences)
+            ## Modulate based on just language
             if self.attntype == "modulate":
                 e = e * self.lang_enc_2(ltrue)
+            ## Sigmoid mask just based on language
             elif self.attntype == "modulatesigm":
                 a = self.sigm(self.lang_enc_2(ltrue))
-                lpred = self.lang_rec(a)
                 e = e * a
+            ## Sigmoid mask based on image and language
             elif self.attntype == "sigmoid":
                 a = self.sigm(self.attn(torch.cat([ltrue, e], -1)))
-                lpred = self.lang_rec(a)
                 e = e * a
+            ## Fully connected language conditioning
             elif self.attntype == "fc":
                 e = self.attn(torch.cat([ltrue, e], -1))
+            ## Scaled dot product attention
             elif self.attntype == "mh":
                 l_t = self.lang_enc_2(self.lang_enc(sentences))
-                e_res = e.unsqueeze(-1) #.repeat(1, 1, self.heads)
-                l_res = l_t.unsqueeze(-1) #.repeat(1, 1, self.heads)
+                e_res = e.unsqueeze(-1)
+                l_res = l_t.unsqueeze(-1)
                 e, a = self.attn(l_res, e_res, e_res)
                 e = e.mean(-1)
-            
         return e.squeeze(), (a, lpred, ltrue)
 
 
     def forward(self, obs, sentences=None, contextlist=None):
+        ## For multi-gpu training
         if (sentences is not None) and (contextlist is not None):
             ls = contextlist.squeeze().cpu().detach().numpy().astype(np.uint8)
             sentences = [sentences[i] for i in ls]
+
+        ## If proprioceptive data is stacked at front of obs
         if self.proprio_shape > 0:
             proprio = obs[:, -self.proprio_shape:]
             obs = obs[:, :-self.proprio_shape].reshape([obs.shape[0]] + list(self.obs_shape))
+
         a = None
         h = []
+        ## Encode and stack each image
         obs = obs.float() /  255.0
         for i in range(0, self.num_ims*3, 3):
             obs_p = self.preprocess(obs[:, i:(i+3)])
@@ -167,6 +162,7 @@ class ResnetEncoder(nn.Module):
             h.append(e)
         h = torch.cat(h, -1)
         h = h.view(h.shape[0], -1)
+        ## Add back proprioception if there
         if self.proprio_shape > 0:
             h = torch.cat([h, proprio], -1)
         return (h, a)
