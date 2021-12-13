@@ -38,6 +38,7 @@ class ResnetEncoder(nn.Module):
         self.num_ims = num_ims
         self.obs_shape = obs_shape
         self.lang_cond = lang_cond
+        self.size = size
         self.lsize = lsize
         self.attntype = attntype
         self.proprio_shape = proprio_shape
@@ -47,17 +48,24 @@ class ResnetEncoder(nn.Module):
             self.output_dim = 512
         elif size == 50:
             self.output_dim = 2048
+        elif size == 0:
+            self.output_dim = 768
         self.repr_dim = self.output_dim * num_ims + proprio_shape
+
+        if self.size == 0:
+            normlayer = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        else:
+            normlayer = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         
         if reshape:
             self.preprocess = nn.Sequential(
                         transforms.Resize(256),
                         transforms.CenterCrop(224),
-                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                        normlayer,
                 )
         else:
             self.preprocess = nn.Sequential(
-                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                        normlayer,
                 )
 
         if size == 18:
@@ -66,6 +74,16 @@ class ResnetEncoder(nn.Module):
             self.convnet = torchvision.models.resnet34(pretrained=pretrained)
         elif size == 50:
             self.convnet = torchvision.models.resnet50(pretrained=pretrained)
+        elif size == 0:
+            from transformers import ViTModel, ViTConfig, ViTFeatureExtractor
+            # configuration = ViTConfig()
+            # model = ViTModel(configuration)
+            if pretrained:
+                # self.fe = ViTFeatureExtractor.from_pretrained('google/vit-base-patch32-224-in21k')
+                self.convnet = AutoModel.from_pretrained('google/vit-base-patch32-224-in21k').to('cuda')
+            else:
+                # self.fe = ViTFeatureExtractor.from_pretrained('google/vit-base-patch32-224-in21k')
+                self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to('cuda')
 
         self.convnet.fc = Identity()
         if self.finetune:
@@ -91,6 +109,10 @@ class ResnetEncoder(nn.Module):
                 self.heads = 1 ## One head scaled dot product attention
                 self.attn = torch.nn.MultiheadAttention(self.heads, self.heads, batch_first=True)
                 self.lang_enc_2 = nn.Linear(self.lang_enc.lang_size, self.output_dim)
+
+            self.lang_rec = nn.Sequential(nn.Linear(self.output_dim, self.output_dim),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(self.output_dim, self.lang_enc.lang_size))
             self.sigm = Sigmoid()
 
         if not pretrained:
@@ -108,7 +130,10 @@ class ResnetEncoder(nn.Module):
             return e, (None, None, None)
 
         ### Encode with Resnet
-        e = self.convnet(image).squeeze(-1).squeeze(-1)
+        if self.size == 0:
+            e0 = self.convnet(image)["pooler_output"]
+        else:
+            e0 = self.convnet(image).squeeze(-1).squeeze(-1)
         a = None
         lpred, ltrue = None, None
         ## If language conditioned
@@ -116,25 +141,27 @@ class ResnetEncoder(nn.Module):
             ltrue = self.lang_enc(sentences)
             ## Modulate based on just language
             if self.attntype == "modulate":
-                e = e * self.lang_enc_2(ltrue)
+                e = e0 * self.lang_enc_2(ltrue)
             ## Sigmoid mask just based on language
             elif self.attntype == "modulatesigm":
                 a = self.sigm(self.lang_enc_2(ltrue))
-                e = e * a
+                e = e0 * a
             ## Sigmoid mask based on image and language
             elif self.attntype == "sigmoid":
-                a = self.sigm(self.attn(torch.cat([ltrue, e], -1)))
-                e = e * a
+                a = self.sigm(self.attn(torch.cat([ltrue, e0], -1)))
+                e = e0 * a
             ## Fully connected language conditioning
             elif self.attntype == "fc":
-                e = self.attn(torch.cat([ltrue, e], -1))
+                e = self.attn(torch.cat([ltrue, e0], -1))
             ## Scaled dot product attention
             elif self.attntype == "mh":
                 l_t = self.lang_enc_2(self.lang_enc(sentences))
-                e_res = e.unsqueeze(-1)
+                e_res = e0.unsqueeze(-1)
                 l_res = l_t.unsqueeze(-1)
                 e, a = self.attn(l_res, e_res, e_res)
                 e = e.mean(-1)
+        else:
+            e = e0
         return e.squeeze(), (a, lpred, ltrue)
 
 
@@ -170,14 +197,16 @@ class ResnetEncoder(nn.Module):
 
 class Representation:
     def __init__(self, device, lr, feature_dim,
-                 hidden_dim, use_tb, finetune=1, pretrained=0, size=34, l2weight=1.0, 
+                 hidden_dim, use_tb, finetune=1, pretrained=0, size=34, l2weight=1.0, l1weight=1.0, 
                  langweight=1.0, tcnweight=0.0, structured=False, lang_cond=False, 
                  gt=False, l2dist=True, attntype="modulate", finetunelang=0, lsize=32, 
-                 distributed=False, cpcweight = 0.0, num_same=1, langtype="reconstruct"):
+                 distributed=False, cpcweight = 0.0, num_same=1, langtype="reconstruct", anneall1=False):
 
         self.device = device
         self.use_tb = use_tb
         self.l2weight=l2weight
+        self.l1weight=l1weight
+        self.anneall1 = anneall1
         self.lang_cond = lang_cond
         self.tcnweight = tcnweight
         self.cpcweight = cpcweight
@@ -349,25 +378,40 @@ class Representation:
 
         ## Encode Start and End Frames
         bs = b_im0.shape[0]
-        bim = torch.stack([b_im0, b_img, b_s0, b_s1, b_s2], 0)
+        ### Order such that 5 states from same video are in order
+        ### That way, if split across gpus, still get distribution of time and video in each batch
+        bim = torch.stack([b_im0, b_img, b_s0, b_s1, b_s2], 1)
         bim = bim.reshape(5*bs, 3, 224, 224)
         contextlist = torch.tensor(range(0, bs*5))
-        alle, out = self.encoder(bim, context, contextlist)
+        alles, out = self.encoder(bim, context, contextlist)
         att, _, ltrue = out
-        alle = alle.reshape(5, bs, -1)
-        e0 = alle[0]
-        eg = alle[1]
-        es0 = alle[2]
-        es1 = alle[3]
-        es2 = alle[4]
+        alle = alles.reshape(bs, 5, -1)
+        e0 = alle[:, 0]
+        eg = alle[:, 1]
+        es0 = alle[:, 2]
+        es1 = alle[:, 3]
+        es2 = alle[:, 4]
 
         full_loss = 0
         langstuff, smoothstuff = None, None
 
-        ## L1 Loss
-        l1loss = (torch.linalg.norm(e0, ord=1) + torch.linalg.norm(eg, ord=1)) / 2.0
+        ## LP Loss
+        l2loss = torch.linalg.norm(alles, ord=2)
+        if att is not None:
+            l1loss = torch.linalg.norm(att, ord=1)
+            l0loss = torch.linalg.norm(att, ord=0, dim=-1).mean()
+        else:
+            l1loss = torch.linalg.norm(alles, ord=1)
+            l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
+        metrics['l2loss'] = l2loss.item()
         metrics['l1loss'] = l1loss.item()
-        full_loss += self.l2weight * l1loss
+        metrics['l0loss'] = l0loss.item()
+        full_loss += self.l2weight * l2loss
+        if self.anneall1:
+            currl1weight = min(1.0, (step / 1000000.0)) * self.l1weight
+            full_loss += currl1weight * l1loss
+        else:
+            full_loss += self.l1weight * l1loss
  
 
         t3 = time.time()
@@ -436,6 +480,7 @@ class Representation:
             full_loss += self.langweight * rewloss
             langstuff = (e0, eg, preds)
 
+        t4 = time.time()
         ## Cross Video Contrative Loss
         if self.cpcweight > 0:
             sim_0_2 = self.sim(es2, es0) 
@@ -461,7 +506,6 @@ class Representation:
             full_loss += self.cpcweight * cpcloss
 
         ## Within Video TCN Loss
-        t4 = time.time()
         if self.tcnweight > 0:
             assert(not self.gt)
             sim_0_2 = self.sim(es2, es0) 
@@ -488,8 +532,7 @@ class Representation:
         if (step % self.eval_freq == 0):
             self.log_batch(b_im0, b_img, b_s0, b_s1, b_s2, step, b_lang, eval, langstuff, smoothstuff)
         t6 = time.time()
-        # print(f"Aug time {t2-t1}, Encode A tine {t3-t2},  \
-        #         Lang time {t4-t3}, Smooth time {t5-t4}, Backprop time {t6-t5}")
+        # print(f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, Backprop time {t6-t5}")
 
         return metrics
 

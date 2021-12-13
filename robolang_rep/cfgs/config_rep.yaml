@@ -44,6 +44,8 @@ agent:
   pretrained: 0
   size: 34
   l2weight: 0.00001
+  l1weight: 0.00001
+  anneall1: false
   tcnweight: 1.0
   cpcweight: 1.0
   langweight: 0.0
