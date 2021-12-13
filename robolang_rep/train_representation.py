@@ -51,15 +51,17 @@ class Ego4DBuffer(IterableDataset):
         #         transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
         #     )
 
-        # self.aug = torch.nn.Sequential(
-        #         transforms.Resize(256),
-        #         transforms.RandomCrop(224),
-        #     )
-
-        self.aug = torch.nn.Sequential(
-                transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+        if self.simclr:
+            self.aug = torch.nn.Sequential(
+                    transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                )
+        else:
+            self.aug = torch.nn.Sequential(
+                transforms.Resize(256),
+                transforms.RandomCrop(224),
             )
+
 
 
         # Load Data
