@@ -37,11 +37,13 @@ def make_network(cfg):
 
 ## Data Loader for Ego4D
 class Ego4DBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, num_same=1):
+    def __init__(self, num_workers, source1, source2, alpha, num_same=1, simclr=False):
         self._num_workers = max(1, num_workers)
         self.alpha = alpha
         self.num_same = num_same
         self.curr_same = 0
+
+        self.simclr = simclr
 
         # Augmentations
         # self.aug = torch.nn.Sequential(
@@ -49,9 +51,14 @@ class Ego4DBuffer(IterableDataset):
         #         transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
         #     )
 
+        # self.aug = torch.nn.Sequential(
+        #         transforms.Resize(256),
+        #         transforms.RandomCrop(224),
+        #     )
+
         self.aug = torch.nn.Sequential(
-                transforms.Resize(256),
-                transforms.RandomCrop(224),
+                transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
             )
 
 
@@ -81,6 +88,12 @@ class Ego4DBuffer(IterableDataset):
         txt = m["txt"]
         txt = txt[2:]
         path = m["path"]
+
+        if self.simclr:
+            s1_ind = np.random.randint(2, vidlen)
+            imts1_v1 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
+            imts1_v2 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
+            return (imts1_v1, imts1_v2)
 
         start_ind = np.random.randint(1, 2 + int(self.alpha * vidlen))
         end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
@@ -255,7 +268,8 @@ class Workspace:
 
         print("Creating Dataloader")
         if self.cfg.dataset == "ego4d":
-            train_iterable = Ego4DBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha, num_same=self.cfg.num_same)
+            train_iterable = Ego4DBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha, 
+                    num_same=self.cfg.num_same, simclr = (self.cfg.simclr))
             ## Ego4D Val set is WIP
             # val_iterable = train_iterable
         elif self.cfg.dataset == "gt":
@@ -332,11 +346,18 @@ class Workspace:
         while train_until_step(self.global_step):
             ## Sample Batch
             t0 = time.time()
-            batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.train_loader)
-            t1 = time.time()
-            batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
-                    batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-            metrics = self.model.update(batch, self.global_step)
+            
+            if self.cfg.simclr:
+                bf1, bf2 = next(self.train_loader)
+                t1 = time.time()
+                batch = (bf1.cuda(), bf2.cuda())
+                metrics = self.model.update_simclr(batch, self.global_step)
+            else:
+                batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.train_loader)
+                t1 = time.time()
+                batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
+                        batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
+                metrics = self.model.update(batch, self.global_step)
             t2 = time.time()
             self.logger.log_metrics(metrics, self.global_frame, ty='train')
 
@@ -346,10 +367,16 @@ class Workspace:
                 
             if eval_every_step(self.global_step):
                 with torch.no_grad():
-                    batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.val_loader)
-                    batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
+                    
+                    if self.cfg.simclr:
+                        bf1, bf2 = next(self.val_loader)
+                        batch = (bf1.cuda(), bf2.cuda())
+                        metrics = self.model.update_simclr(batch, self.global_step, eval=True)
+                    else:
+                        batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.val_loader)
+                        batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
                             batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-                    metrics = self.model.update(batch, self.global_step, eval=True)
+                        metrics = self.model.update(batch, self.global_step, eval=True)
                     self.logger.log_metrics(metrics, self.global_frame, ty='eval')
                     print("EVAL", self.global_step, metrics)
 

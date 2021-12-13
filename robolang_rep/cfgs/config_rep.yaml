@@ -31,6 +31,7 @@ lowdim: 0
 alpha: 0.2
 dataset: "sthsth"
 wandbproject: drq_rep
+simclr: false
 
 
 agent:

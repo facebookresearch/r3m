@@ -536,6 +536,83 @@ class Representation:
 
         return metrics
 
+    def update_simclr(self, batch, step, eval=False):
+        t0 = time.time()
+        metrics = dict()
+        if eval:
+            self.encoder.eval()
+            self.rew_model.eval()
+            self.lang_enc.eval()
+        else:
+            self.encoder.train()
+            self.rew_model.train()
+            if self.finetunelang:
+                self.lang_enc.train()
+
+        t1 = time.time()
+        ## Batch
+        imv1, imv2 = batch
+        t2 = time.time()
+
+        ## Encode Start and End Frames
+        bs = imv1.shape[0]
+        ### Order such that 5 states from same video are in order
+        ### That way, if split across gpus, still get distribution of time and video in each batch
+        bim = torch.stack([imv1, imv2], 1)
+        bim = bim.reshape(2*bs, 3, 224, 224)
+        contextlist = torch.tensor(range(0, bs*2))
+        alles, _ = self.encoder(bim, None, contextlist)
+        alle = alles.reshape(bs, 2, -1)
+        ev1 = alle[:, 0]
+        ev2 = alle[:, 1]
+
+        full_loss = 0
+
+        ## LP Loss
+        l2loss = torch.linalg.norm(alles, ord=2)
+        l1loss = torch.linalg.norm(alles, ord=1)
+        l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
+        metrics['l2loss'] = l2loss.item()
+        metrics['l1loss'] = l1loss.item()
+        metrics['l0loss'] = l0loss.item()
+        full_loss += self.l2weight * l2loss
+        if self.anneall1:
+            currl1weight = min(1.0, (step / 1000000.0)) * self.l1weight
+            full_loss += currl1weight * l1loss
+        else:
+            full_loss += self.l1weight * l1loss
+ 
+
+        t3 = time.time()
+        ## SimCLR loss
+        pos = self.sim(ev1, ev2)
+        neg = self.sim(ev1.repeat(bs, 1), ev1.repeat_interleave(bs, 0))
+        neg = neg.reshape(bs, bs)
+        neg = neg.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
+
+        neg2 = self.sim(ev1.repeat(bs, 1), ev2.repeat_interleave(bs, 0))
+        neg2 = neg2.reshape(bs, bs)
+        neg2 = neg2.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
+
+        contrastive_loss = -torch.log(epsilon + (torch.exp(pos) / 
+                    (epsilon + torch.exp(neg).sum(-1) + torch.exp(neg2).sum(-1) + torch.exp(pos)))).mean()
+        full_loss += contrastive_loss        
+        metrics['contrastive_loss'] = contrastive_loss.item() 
+        
+        t4 = time.time()
+        metrics['full_loss'] = full_loss.item()
+        
+        t5 = time.time()
+        if not eval:
+            self.encoder_opt.zero_grad()
+            full_loss.backward()
+            self.encoder_opt.step()
+
+        t6 = time.time()
+        # print(f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, Backprop time {t6-t5}")
+
+        return metrics
+
 
 class LangEncoder(nn.Module):
   def __init__(self, finetune = False, scratch=False):
