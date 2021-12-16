@@ -44,7 +44,7 @@ agent:
   l1weight: 0.00001
   anneall1: false
   tcnweight: 1.0
-  cpcweight: 1.0
+  cpcweight: 0.5
   langweight: 0.0
   structured: true
   lang_cond: false
