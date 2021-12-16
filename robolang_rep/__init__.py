@@ -1,1 +1,1 @@
-from robolang_rep.models import Representation
+from robolang_rep.models_r3m import R3M

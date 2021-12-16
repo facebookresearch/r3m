@@ -20,6 +20,7 @@ from torchvision import transforms
 from torch.utils.data import IterableDataset
 import pandas as pd
 from robolang_rep import utils
+from robolang_rep.trainer import Trainer
 from logger import Logger
 import json
 import time
@@ -33,7 +34,10 @@ torch.backends.cudnn.benchmark = True
 
 
 def make_network(cfg):
-    return hydra.utils.instantiate(cfg)
+    model =  hydra.utils.instantiate(cfg)
+    print("Let's use", torch.cuda.device_count(), "GPUs!")
+    model = torch.nn.DataParallel(model)
+    return model.cuda()
 
 ## Data Loader for Ego4D
 class Ego4DBuffer(IterableDataset):
@@ -53,14 +57,14 @@ class Ego4DBuffer(IterableDataset):
 
         if self.simclr:
             self.aug = torch.nn.Sequential(
-                    transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
+                    transforms.RandomResizedCrop(224, scale = (0.08, 1.0)),
                     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
                 )
         else:
             self.aug = torch.nn.Sequential(
-                transforms.Resize(256),
-                transforms.RandomCrop(224),
-            )
+                    transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                )
 
 
 
@@ -111,7 +115,8 @@ class Ego4DBuffer(IterableDataset):
 
         self.curr_same += 1
         label = txt
-        return (im0, img, imts0, imts1, imts2, label)
+        im = torch.stack([im0, img, imts0, imts1, imts2])
+        return (im, label)
 
     def __iter__(self):
         while True:
@@ -314,7 +319,7 @@ class Workspace:
 
     def setup(self):
         # create logger
-        self.logger = Logger(self.work_dir, use_tb=self.cfg.use_tb, cfg=self.cfg)
+        self.logger = Logger(self.work_dir, use_tb=False, cfg=self.cfg)
 
     @property
     def global_step(self):
@@ -341,7 +346,7 @@ class Workspace:
         eval_freq = self.cfg.eval_freq
         eval_every_step = utils.Every(eval_freq,
                                       1)
-        self.model.eval_freq = eval_freq
+        trainer = Trainer(eval_freq)
 
         ## Training Loop
         print("Begin Training")
@@ -355,17 +360,16 @@ class Workspace:
                 batch = (bf1.cuda(), bf2.cuda())
                 metrics = self.model.update_simclr(batch, self.global_step)
             else:
-                batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.train_loader)
+                batch_f, batch_langs = next(self.train_loader)
                 t1 = time.time()
-                batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
-                        batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-                metrics = self.model.update(batch, self.global_step)
+                metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step)
             t2 = time.time()
             self.logger.log_metrics(metrics, self.global_frame, ty='train')
 
             if self.global_step % 10 == 0:
                 print(self.global_step, metrics)
                 print(f'Sample time {t1-t0}, Update time {t2-t1}')
+                print(st)
                 
             if eval_every_step(self.global_step):
                 with torch.no_grad():
@@ -375,10 +379,8 @@ class Workspace:
                         batch = (bf1.cuda(), bf2.cuda())
                         metrics = self.model.update_simclr(batch, self.global_step, eval=True)
                     else:
-                        batch_frames_0, batch_frames_g, batch_frames_s0, batch_frames_s1, batch_frames_s2, batch_langs = next(self.val_loader)
-                        batch = (batch_frames_0.cuda(), batch_frames_g.cuda(), 
-                            batch_frames_s0.cuda(), batch_frames_s1.cuda(), batch_frames_s2.cuda(), batch_langs)
-                        metrics = self.model.update(batch, self.global_step, eval=True)
+                        batch_f, batch_langs = next(self.val_loader)
+                        metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)
                     self.logger.log_metrics(metrics, self.global_frame, ty='eval')
                     print("EVAL", self.global_step, metrics)
 
@@ -388,32 +390,15 @@ class Workspace:
     def save_snapshot(self):
         snapshot = self.work_dir / f'snapshot_{self.global_step}.pt'
         global_snapshot =  self.work_dir / f'snapshot.pt'
-        if self.cfg.agent.distributed:
-            e = self.model.encoder.module
-            rm = self.model.rew_model.module
-            le = self.model.lang_enc.module
-        else:
-            e = self.model.encoder
-            rm = self.model.rew_model
-            le = self.model.lang_enc
-
         sdict = {}
-        sdict["convnet"] = e.convnet.state_dict()
-        if self.cfg.agent.lang_cond:
-            sdict["encoder"] = e.state_dict()
-        sdict["rewmodel"] = rm.state_dict()
-        sdict["lang_enc"] = le.state_dict()
+        sdict["r3m"] = self.model.state_dict()
         torch.save(sdict, snapshot)
         sdict["global_step"] = self._global_step
         torch.save(sdict, global_snapshot)
 
     def load_snapshot(self, snapshot_path):
         payload = torch.load(snapshot_path)
-        self.model.encoder.convnet.load_state_dict(payload['convnet'])
-        if self.cfg.agent.lang_cond:
-            self.model.encoder.load_state_dict(payload['encoder'])
-        self.model.rew_model.load_state_dict(payload['rewmodel'])
-        self.model.lang_enc.load_state_dict(payload['lang_enc'])
+        self.model.load_state_dict(payload['r3m'])
         try:
             self._global_step = payload['global_step']
         except:

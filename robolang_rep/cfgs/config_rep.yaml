@@ -19,12 +19,10 @@ seed: 1
 device: cuda
 save_video: true
 save_train_video: false
-use_tb: false
 # experiment
 experiment: train_rep_0929_sweep
 # agent
 lr: 1e-4
-feature_dim: 50
 # lowdim
 lowdim: 0
 # data
@@ -35,12 +33,10 @@ simclr: false
 
 
 agent:
-  _target_: robolang_rep.Representation
+  _target_: robolang_rep.R3M
   device: ${device}
   lr: ${lr}
-  use_tb: ${use_tb}
   hidden_dim: 1024
-  feature_dim: ${feature_dim}
   finetune: 1
   pretrained: 0
   size: 34
@@ -53,11 +49,8 @@ agent:
   structured: true
   lang_cond: false
   l2dist: true
-  # sanity check
-  gt: false
   attntype: modulate
   finetunelang: false
-  lsize: 32
-  distributed: false
   num_same: ${num_same}
   langtype: reconstruct
+  mask: true
