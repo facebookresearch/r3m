@@ -50,22 +50,20 @@ class Ego4DBuffer(IterableDataset):
         self.simclr = simclr
 
         # Augmentations
-        # self.aug = torch.nn.Sequential(
-        #         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-        #         transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-        #     )
-
         if self.simclr:
+            cj = transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2)
             self.aug = torch.nn.Sequential(
                     transforms.RandomResizedCrop(224, scale = (0.08, 1.0)),
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomApply([cj], p=0.8),
+                    transforms.RandomGrayscale(p=0.2),
+                    transforms.GaussianBlur(23, sigma=(0.1, 2.0))
                 )
         else:
             self.aug = torch.nn.Sequential(
-                    transforms.RandomResizedCrop(224, scale = (0.5, 1.0)),
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-                )
-
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
+            )
 
 
         # Load Data
@@ -358,7 +356,7 @@ class Workspace:
                 bf1, bf2 = next(self.train_loader)
                 t1 = time.time()
                 batch = (bf1.cuda(), bf2.cuda())
-                metrics = self.model.update_simclr(batch, self.global_step)
+                metrics, st = trainer.update_simclr(self.model, batch, self.global_step)
             else:
                 batch_f, batch_langs = next(self.train_loader)
                 t1 = time.time()
@@ -377,7 +375,7 @@ class Workspace:
                     if self.cfg.simclr:
                         bf1, bf2 = next(self.val_loader)
                         batch = (bf1.cuda(), bf2.cuda())
-                        metrics = self.model.update_simclr(batch, self.global_step, eval=True)
+                        metrics, st = trainer.update_simclr(self.model, batch, self.global_step, eval=True)
                     else:
                         batch_f, batch_langs = next(self.val_loader)
                         metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)

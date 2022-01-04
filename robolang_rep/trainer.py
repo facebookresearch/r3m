@@ -56,12 +56,12 @@ class Trainer():
         langstuff, smoothstuff = None, None
 
         ## LP Loss
-        l2loss = torch.linalg.norm(alles, ord=2)
+        l2loss = torch.linalg.norm(alles, ord=2, dim=-1).mean()
         if att is not None:
-            l1loss = torch.linalg.norm(att, ord=1)
+            l1loss = torch.linalg.norm(att, ord=1, dim=-1).mean()
             l0loss = torch.linalg.norm(att, ord=0, dim=-1).mean()
         else:
-            l1loss = torch.linalg.norm(alles, ord=1)
+            l1loss = torch.linalg.norm(alles, ord=1, dim=-1).mean()
             l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
         metrics['l2loss'] = l2loss.item()
         metrics['l1loss'] = l1loss.item()
@@ -77,20 +77,27 @@ class Trainer():
         t3 = time.time()
         ## Language Predictive Loss
         if model.module.langweight > 0:
+            num_neg = 3
             b_lang_shuf = copy.deepcopy(b_lang)
-            random.shuffle(b_lang_shuf)
 
-            sim_0, _ = model.module.get_reward(e0, eg, b_lang)
-            sim_n, _ = model.module.get_reward(e0, eg, b_lang_shuf)
-            sim_g, _ = model.module.get_reward(e0, e0, b_lang)
+            sim_pos, _ = model.module.get_reward(e0, eg, b_lang)
+            sim_negs = []
+            sim_negs.append(model.module.get_reward(e0, es0, b_lang)[0])
+            sim_negs.append(model.module.get_reward(e0, es1, b_lang)[0])
+            sim_negs.append(model.module.get_reward(e0, es2, b_lang)[0])
+            for _ in range(num_neg):
+                random.shuffle(b_lang_shuf)
+                sim_negs.append(model.module.get_reward(e0, eg, b_lang_shuf)[0])
+            sim_negs = torch.stack(sim_negs, -1)
+            sim_negs_exp = torch.exp(sim_negs)
 
-            rewloss = -torch.log(epsilon + (torch.exp(sim_g) / (epsilon + torch.exp(sim_0) + torch.exp(sim_n) + torch.exp(sim_g)))).mean()
-            lacc = ((1.0 * (sim_0 < sim_g)) * (1.0 * (sim_n < sim_g))).mean()
+            rewloss = -torch.log(epsilon + (torch.exp(sim_pos) / (epsilon + torch.exp(sim_pos) + sim_negs_exp.sum(-1)))).mean()
+            lacc = (1.0 * (sim_negs.max(-1)[0] < sim_pos)).mean()
             metrics['rewloss'] = rewloss.item()
             metrics['rewacc'] = lacc.item()
 
             full_loss += model.module.langweight * rewloss
-            langstuff = (e0, eg, sim_0)
+            langstuff = (e0, eg, sim_pos)
 
         t4 = time.time()
         ## Cross Video Contrative Loss
@@ -146,82 +153,67 @@ class Trainer():
         st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, TCN time {t6-t5}, Backprop time {t7-t6}"
         return metrics, st
 
-    # def update_simclr(self, batch, step, eval=False):
-    #     t0 = time.time()
-    #     metrics = dict()
-    #     if eval:
-    #         self.encoder.eval()
-    #         self.rew_model.module.eval()
-    #         self.lang_enc.eval()
-    #     else:
-    #         self.encoder.train()
-    #         self.rew_model.module.train()
-    #         if self.finetunelang:
-    #             self.lang_enc.train()
+    def update_simclr(self, model, batch, step, eval=False):
+        t0 = time.time()
+        metrics = dict()
+        if eval:
+            model.eval()
+        else:
+            model.train()
 
-    #     t1 = time.time()
-    #     ## Batch
-    #     imv1, imv2 = batch
-    #     t2 = time.time()
+        t1 = time.time()
+        ## Batch
+        imv1, imv2 = batch
+        t2 = time.time()
 
-    #     ## Encode Start and End Frames
-    #     bs = imv1.shape[0]
-    #     ### Order such that 5 states from same video are in order
-    #     ### That way, if split across gpus, still get distribution of time and video in each batch
-    #     bim = torch.stack([imv1, imv2], 1)
-    #     bim = bim.reshape(2*bs, 3, 224, 224)
-    #     contextlist = torch.tensor(range(0, bs*2))
-    #     alles, _ = self.encoder(bim, None, contextlist)
-    #     alle = alles.reshape(bs, 2, -1)
-    #     ev1 = alle[:, 0]
-    #     ev2 = alle[:, 1]
+        ## Encode Start and End Frames
+        bs = imv1.shape[0]
+        ### Order such that 5 states from same video are in order
+        ### That way, if split across gpus, still get distribution of time and video in each batch
+        ## Put positive examples on different GPU when multibatch to prevent cheating
+        bim = torch.stack([imv1, imv2], 0)
+        bim = bim.reshape(2*bs, 3, 224, 224)
+        contextlist = torch.tensor(range(0, bs*2))
+        alles, _ = model(bim)
+        alle = alles.reshape(2, bs, -1)
+        ev1 = alle[0]
+        ev2 = alle[1]
 
-    #     full_loss = 0
+        full_loss = 0
 
-    #     ## LP Loss
-    #     l2loss = torch.linalg.norm(alles, ord=2)
-    #     l1loss = torch.linalg.norm(alles, ord=1)
-    #     l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
-    #     metrics['l2loss'] = l2loss.item()
-    #     metrics['l1loss'] = l1loss.item()
-    #     metrics['l0loss'] = l0loss.item()
-    #     full_loss += self.l2weight * l2loss
-    #     if self.anneall1:
-    #         currl1weight = min(1.0, (step / 1000000.0)) * self.l1weight
-    #         full_loss += currl1weight * l1loss
-    #     else:
-    #         full_loss += self.l1weight * l1loss
- 
+        t3 = time.time()
+        ## SimCLR loss
+        temperature = 0.1
+        pos = model.module.sim(ev1, ev2) / temperature
+        neg = model.module.sim(ev1.repeat(bs, 1), ev1.repeat_interleave(bs, 0)) / temperature
+        neg = neg.reshape(bs, bs)
+        neg = neg.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
 
-    #     t3 = time.time()
-    #     ## SimCLR loss
-    #     pos = self.sim(ev1, ev2)
-    #     neg = self.sim(ev1.repeat(bs, 1), ev1.repeat_interleave(bs, 0))
-    #     neg = neg.reshape(bs, bs)
-    #     neg = neg.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
+        neg2 = model.module.sim(ev1.repeat(bs, 1), ev2.repeat_interleave(bs, 0)) / temperature
+        neg2 = neg2.reshape(bs, bs)
+        neg2 = neg2.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
 
-    #     neg2 = self.sim(ev1.repeat(bs, 1), ev2.repeat_interleave(bs, 0))
-    #     neg2 = neg2.reshape(bs, bs)
-    #     neg2 = neg2.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
-
-    #     contrastive_loss = -torch.log(epsilon + (torch.exp(pos) / 
-    #                 (epsilon + torch.exp(neg).sum(-1) + torch.exp(neg2).sum(-1) + torch.exp(pos)))).mean()
-    #     full_loss += contrastive_loss        
-    #     metrics['contrastive_loss'] = contrastive_loss.item() 
+        contrastive_loss = -torch.log(epsilon + (torch.exp(pos) / 
+                    (epsilon + torch.exp(neg).sum(-1) + torch.exp(neg2).sum(-1) + torch.exp(pos)))).mean()
+        full_loss += contrastive_loss    
+        acc = (1.0 * ((pos > neg2.max(-1)[0]) * (pos > neg.max(-1)[0]))).mean()
+        metrics['contrastive_loss'] = contrastive_loss.item() 
+        metrics['acc'] = acc.item() 
         
-    #     t4 = time.time()
-    #     metrics['full_loss'] = full_loss.item()
+        t4 = time.time()
+        metrics['full_loss'] = full_loss.item()
         
-    #     t5 = time.time()
-    #     if not eval:
-    #         self.encoder_opt.zero_grad()
-    #         full_loss.backward()
-    #         self.encoder_opt.step()
+        t5 = time.time()
+        if not eval:
+            model.module.encoder_opt.zero_grad()
+            full_loss.backward()
+            model.module.encoder_opt.step()
+            model.module.sched.step()
 
-    #     t6 = time.time()
-    #     # print(f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, Backprop time {t6-t5}")
+        t6 = time.time()
+        st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode time {t3-t2}, Loss time {t4-t3},  Backprop time {t6-t5}"
 
-    #     return metrics
+        return metrics, st
 
     ## Logging initial and final images and their language
     def log_data(self, b_im0, b_img, step, lang, eval):

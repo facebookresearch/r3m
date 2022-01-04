@@ -24,7 +24,7 @@ def do_nothing(x): return x
 class R3M(nn.Module):
     def __init__(self, device, lr, hidden_dim, finetune=1, pretrained=0, size=34, l2weight=1.0, l1weight=1.0, 
                  langweight=1.0, tcnweight=0.0, structured=False, lang_cond=False, 
-                 l2dist=True, attntype="modulate", finetunelang=0,
+                 l2dist=True, attntype="modulate", finetunelang=0, simclr=False, bs=16,
                  cpcweight = 0.0, num_same=1, langtype="reconstruct", anneall1=False, mask=True):
         super().__init__()
 
@@ -32,6 +32,7 @@ class R3M(nn.Module):
         self.use_tb = False
         self.l2weight = l2weight
         self.l1weight = l1weight
+        self.simclr = simclr
         self.anneall1 = anneall1 ## Anneal up L1 Penalty
         self.lang_cond = lang_cond ## Language conditioned or not
         self.tcnweight = tcnweight ## Weight on TCN loss (states closer in same clip closer in embedding)
@@ -104,20 +105,36 @@ class R3M(nn.Module):
             self.m = None
         ########################################################################
 
+
+        #### SIMCLR
+        if self.simclr:
+            self.projection_head = nn.Sequential(nn.Linear(self.outdim, self.outdim, bias=False),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(self.outdim, 128, bias=False))
+
         ## Optimizer
-        self.encoder_opt = torch.optim.Adam(params, lr = lr)
+        if self.simclr:
+            from pl_bolts.optimizers import LARS
+            from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
+            from torch.optim.lr_scheduler import LambdaLR
+            self.encoder_opt = LARS(params, lr = (0.3 * bs / 256), weight_decay=1e-6)
+            self.sched = LinearWarmupCosineAnnealingLR(self.encoder_opt, warmup_epochs=10000, max_epochs=1000000)
+        else:
+            self.encoder_opt = torch.optim.Adam(params, lr = lr)
+            self.sched = None
 
 
     def encode(self, image, sentences = None):
         ## Assumes preprocessing and resizing is done
         e = self.convnet(image)
+        a = None
         if self.lang_cond:
             le = self.lang_enc(sentences)
             e, a = self.lang_attn(e, le)
 
         if self.mask:
-            a = self.sigm(self.m.unsqueeze(0).repeat(e.shape[0], 1))
-            e = e * a.to(e.device)
+            a = self.sigm(self.m.to(e.device).unsqueeze(0).repeat(e.shape[0], 1))
+            e = e * a
         return e, a
 
     def get_reward(self, e0, es, sentences):
@@ -151,7 +168,7 @@ class R3M(nn.Module):
                 e, a = self.encode(obs_p, sentences)
             else:
                 with torch.no_grad():
-                    e, a = self.convnet(obs_p, sentences)
+                    e, a = self.encode(obs_p, sentences)
             h.append(e)
         h = torch.cat(h, -1)
         h = h.view(h.shape[0], -1)
