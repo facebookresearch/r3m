@@ -78,60 +78,75 @@ class Trainer():
         ## Language Predictive Loss
         if model.module.langweight > 0:
             num_neg = 3
-            b_lang_shuf = copy.deepcopy(b_lang)
+            # b_lang_shuf = copy.deepcopy(b_lang)
 
-            sim_pos, _ = model.module.get_reward(e0, eg, b_lang)
-            sim_negs = []
-            sim_negs.append(model.module.get_reward(e0, es0, b_lang)[0])
-            sim_negs.append(model.module.get_reward(e0, es1, b_lang)[0])
-            sim_negs.append(model.module.get_reward(e0, es2, b_lang)[0])
+            sim_pos1, _ = model.module.get_reward(e0, eg, b_lang)
+            sim_pos2, _ = model.module.get_reward(e0, es1, b_lang)
+            sim_pos3, _ = model.module.get_reward(e0, es2, b_lang)
+            sim_negs1 = []
+            sim_negs2 = []
+            sim_negs3 = []
+            sim_negs1.append(model.module.get_reward(e0, e0, b_lang)[0])
+            sim_negs2.append(model.module.get_reward(e0, es0, b_lang)[0])
+            sim_negs3.append(model.module.get_reward(e0, es1, b_lang)[0])
             for _ in range(num_neg):
-                random.shuffle(b_lang_shuf)
-                sim_negs.append(model.module.get_reward(e0, eg, b_lang_shuf)[0])
-            sim_negs = torch.stack(sim_negs, -1)
-            sim_negs_exp = torch.exp(sim_negs)
+                # random.shuffle(b_lang_shuf)
+                negvidid = torch.randperm(e0.size()[0])
+                sim_negs1.append(model.module.get_reward(e0[negvidid], eg[negvidid], b_lang)[0])
+                negvidid = torch.randperm(e0.size()[0])
+                sim_negs2.append(model.module.get_reward(e0[negvidid], es1[negvidid], b_lang)[0])
+                negvidid = torch.randperm(e0.size()[0])
+                sim_negs3.append(model.module.get_reward(e0[negvidid], es2[negvidid], b_lang)[0])
+            sim_negs1 = torch.stack(sim_negs1, -1)
+            sim_negs_exp1 = torch.exp(sim_negs1)
+            sim_negs2 = torch.stack(sim_negs2, -1)
+            sim_negs_exp2 = torch.exp(sim_negs2)
+            sim_negs3 = torch.stack(sim_negs3, -1)
+            sim_negs_exp3 = torch.exp(sim_negs3)
 
-            rewloss = -torch.log(epsilon + (torch.exp(sim_pos) / (epsilon + torch.exp(sim_pos) + sim_negs_exp.sum(-1)))).mean()
-            lacc = (1.0 * (sim_negs.max(-1)[0] < sim_pos)).mean()
+            rewloss1 = -torch.log(epsilon + (torch.exp(sim_pos1) / (epsilon + torch.exp(sim_pos1) + sim_negs_exp1.sum(-1))))
+            rewloss2 = -torch.log(epsilon + (torch.exp(sim_pos2) / (epsilon + torch.exp(sim_pos2) + sim_negs_exp2.sum(-1))))
+            rewloss3 = -torch.log(epsilon + (torch.exp(sim_pos3) / (epsilon + torch.exp(sim_pos3) + sim_negs_exp3.sum(-1))))
+            rewloss = (rewloss1 + rewloss2 + rewloss3) / 3
+            mask = torch.FloatTensor([1.0 * (b != "") for b in b_lang]).cuda()
+            ### Mask out examples without language
+            rewloss = rewloss * mask
+            rewloss = rewloss.mean()
+            lacc1 = (1.0 * (sim_negs1.max(-1)[0] < sim_pos1)).mean()
+            lacc2 = (1.0 * (sim_negs2.max(-1)[0] < sim_pos2)).mean()
+            lacc3 = (1.0 * (sim_negs3.max(-1)[0] < sim_pos3)).mean()
             metrics['rewloss'] = rewloss.item()
-            metrics['rewacc'] = lacc.item()
+            metrics['rewacc1'] = lacc1.item()
+            metrics['rewacc2'] = lacc2.item()
+            metrics['rewacc3'] = lacc3.item()
+
+            alllangstuff = torch.cat([sim_pos1, sim_negs1[:, 0], sim_negs1[:, 1], sim_negs1[:, 2]], -1)
 
             full_loss += model.module.langweight * rewloss
-            langstuff = (e0, eg, sim_pos)
+            langstuff = (e0, eg, alllangstuff)
 
         t4 = time.time()
-        ## Cross Video Contrative Loss
-        if model.module.cpcweight > 0:
-            sim_0_2 = model.module.sim(es2, es0) 
-            p_s = []
-            n_s = []
-            for k in range(0, bs, model.module.num_same):
-                subbatch = es0[k:(k+model.module.num_same)]
-                pos_s = sim_0_2[k]
-                p_s.append(pos_s)
-                neg_s = []
-                for sb in range(1, model.module.num_same):
-                    neg_s.append(model.module.sim(es0[0].unsqueeze(0), es0[sb].unsqueeze(0)))
-                neg_s = torch.cat(neg_s)
-                n_s.append(neg_s)
-            p_s = torch.stack(p_s)     
-            n_s = torch.stack(n_s)                
-            cpcloss = -torch.log(epsilon + (torch.exp(p_s) / (epsilon + torch.exp(n_s).sum(-1) + torch.exp(p_s)))).mean()
-            nmx, _ = torch.max(n_s, -1)
-            cpcacc = (1.0 * (p_s > nmx)).mean()
-            metrics['cpcloss'] = cpcloss.item()
-            metrics['cpcacc'] = cpcacc.item()
-            full_loss += model.module.cpcweight * cpcloss
 
         t5 = time.time()
         ## Within Video TCN Loss
         if model.module.tcnweight > 0:
+            num_neg_v = 3
             sim_0_2 = model.module.sim(es2, es0) 
             sim_1_2 = model.module.sim(es2, es1)
             sim_0_1 = model.module.sim(es1, es0)
 
-            smoothloss1 = -torch.log(epsilon + (torch.exp(sim_1_2) / (epsilon + torch.exp(sim_0_2) + torch.exp(sim_1_2))))
-            smoothloss2 = -torch.log(epsilon + (torch.exp(sim_0_1) / (epsilon + torch.exp(sim_0_1) + torch.exp(sim_0_2))))
+            neg2 = []
+            neg0 = []
+            for _ in range(num_neg_v):
+                es0_shuf = es0[torch.randperm(es0.size()[0])]
+                es2_shuf = es2[torch.randperm(es2.size()[0])]
+                neg0.append(model.module.sim(es0, es0_shuf))
+                neg2.append(model.module.sim(es2, es2_shuf))
+            neg0 = torch.stack(neg0, -1)
+            neg2 = torch.stack(neg2, -1)
+
+            smoothloss1 = -torch.log(epsilon + (torch.exp(sim_1_2) / (epsilon + torch.exp(sim_0_2) + torch.exp(sim_1_2) + torch.exp(neg2).sum(-1))))
+            smoothloss2 = -torch.log(epsilon + (torch.exp(sim_0_1) / (epsilon + torch.exp(sim_0_1) + torch.exp(sim_0_2) + torch.exp(neg0).sum(-1))))
             smoothloss = ((smoothloss1 + smoothloss2) / 2.0).mean()
             a_state = ((1.0 * (sim_0_2 < sim_1_2)) * (1.0 * (sim_0_1 > sim_0_2))).mean()
             metrics['tcnloss'] = smoothloss.item()

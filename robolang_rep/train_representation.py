@@ -21,6 +21,7 @@ from torch.utils.data import IterableDataset
 import pandas as pd
 from robolang_rep import utils
 from robolang_rep.trainer import Trainer
+from robolang_rep.data_loaders import R3MBuffer, RoboNetBuffer, Ego4DBuffer, GTBuffer, VideoBuffer
 from logger import Logger
 import json
 import time
@@ -39,228 +40,6 @@ def make_network(cfg):
     model = torch.nn.DataParallel(model)
     return model.cuda()
 
-## Data Loader for Ego4D
-class Ego4DBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, num_same=1, simclr=False):
-        self._num_workers = max(1, num_workers)
-        self.alpha = alpha
-        self.num_same = num_same
-        self.curr_same = 0
-
-        self.simclr = simclr
-
-        # Augmentations
-        if self.simclr:
-            cj = transforms.ColorJitter(brightness=0.8, contrast=0.8, saturation=0.8, hue=0.2)
-            self.aug = torch.nn.Sequential(
-                    transforms.RandomResizedCrop(224, scale = (0.08, 1.0)),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomApply([cj], p=0.8),
-                    transforms.RandomGrayscale(p=0.2),
-                    transforms.GaussianBlur(23, sigma=(0.1, 2.0))
-                )
-        else:
-            self.aug = torch.nn.Sequential(
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-                transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-            )
-
-
-        # Load Data
-        print("Ego4D")
-        self.manifest = pd.read_csv("/private/home/surajn/data/ego4d/manifest.csv")
-        print(self.manifest)
-        self.mlen = len(self.manifest)
-
-    def _sample(self):
-        t0 = time.time()
-        if self.curr_same % self.num_same == 0:
-            parentvid = np.random.randint(0, self.mlen)
-            parentm = self.manifest.iloc[parentvid]
-            path = parentm["path"]
-
-            vidsp = path.split("/")[:-2]
-            self.vidsp = "/".join(vidsp)
-
-            scl = [self.vidsp in p for p in self.manifest["path"]]
-            self.num_subclips = np.sum(scl)
-            self.subclips = self.manifest.loc[scl]
-
-        vid = np.random.randint(0, self.num_subclips)
-        m = self.subclips.iloc[vid]
-        vidlen = m["len"]
-        txt = m["txt"]
-        txt = txt[2:]
-        path = m["path"]
-
-        if self.simclr:
-            s1_ind = np.random.randint(2, vidlen)
-            imts1_v1 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
-            imts1_v2 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
-            return (imts1_v1, imts1_v2)
-
-        start_ind = np.random.randint(1, 2 + int(self.alpha * vidlen))
-        end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
-        im0 = self.aug(torchvision.io.read_image(f"{path}/{start_ind:06}.jpg") / 255.0) * 255.0
-        img = self.aug(torchvision.io.read_image(f"{path}/{end_ind:06}.jpg") / 255.0) * 255.0
-
-        s1_ind = np.random.randint(2, vidlen)
-        s0_ind = np.random.randint(1, s1_ind)
-        s2_ind = np.random.randint(s1_ind, vidlen+1)
-        imts0 = self.aug(torchvision.io.read_image(f"{path}/{s0_ind:06}.jpg") / 255.0) * 255.0
-        imts1 = self.aug(torchvision.io.read_image(f"{path}/{s1_ind:06}.jpg") / 255.0) * 255.0
-        imts2 = self.aug(torchvision.io.read_image(f"{path}/{s2_ind:06}.jpg") / 255.0) * 255.0
-
-        self.curr_same += 1
-        label = txt
-        im = torch.stack([im0, img, imts0, imts1, imts2])
-        return (im, label)
-
-    def __iter__(self):
-        while True:
-            yield self._sample()
-
-## Data Loader for Ground Truth Franka Kitchen Demo Data
-class GTBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, shuf, gt=False, alldata=None):
-        self._num_workers = max(1, num_workers)
-        self.alpha = alpha
-        self.source = source1
-        self.shuf = shuf
-        self.gt = gt
-
-        # Preprocess
-        self.preprocess = torch.nn.Sequential(
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                )
-        
-        ## Augment when training
-        if self.source == "train":
-            self.aug = torch.nn.Sequential(
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-                    transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-                )
-        else:
-            self.aug = lambda a : a
-
-        # Load Data
-        self.cams = ["default", "left_cap2", "right_cap2"]
-        self.tasks = ["kitchen_knob1_on-v3","kitchen_light_on-v3","kitchen_sdoor_open-v3",
-                "kitchen_micro_open-v3","kitchen_ldoor_open-v3"]#,"kitchen_rdoor_open-v3"]
-        self.instr = ["Turning the top left knob clockwise", "Switching the light on", 
-                "Sliding the top right door open", "Opening the microwave", 
-                "Opening the top left door"] #, "Opening the middle door"]
-        if alldata is not None:
-            self.all_demos, self.all_labels, self.all_states = alldata
-        else:
-            all_demos = []
-            all_labels = []
-            all_states = []
-            for camera in ["default", "left_cap2", "right_cap2"]:
-                for i, t in enumerate(self.tasks):
-                    path = f"/private/home/surajn/code/vrl_private/vrl/hydra/expert_data/final_paths_multiview_rb_200/{camera}/{t}.pickle"
-                    demo_paths = pickle.load(open(path, 'rb'))
-                    demo_paths = demo_paths[:1000]
-                    print(len(demo_paths), i, t)
-                    for p in demo_paths:
-                        all_demos.append(p["images"])
-                        all_states.append(p["observations"])
-                        all_labels.append(self.instr[i])
-            all_demos = np.stack(all_demos)
-            all_states = np.stack(all_states)
-            self.all_demos = all_demos
-            self.all_labels = all_labels
-            self.all_states = all_states
-        
-
-    def _sample(self):
-        if self.source == "train":
-            vid = np.random.randint(0, int(self.all_demos.shape[0]*0.8))
-        elif self.source == "val":
-            vid = np.random.randint(int(self.all_demos.shape[0]*0.8), self.all_demos.shape[0])
-        t0 = time.time()
-        vid = self.shuf[vid]
-        ims = self.all_demos[vid]
-        vidlen = ims.shape[0]
-        
-
-        start_ind = np.random.randint(0, 1 + int(self.alpha * vidlen))
-        end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
-        s1_ind = np.random.randint(1, vidlen-1)
-        s0_ind = np.random.randint(0, s1_ind)
-        s2_ind = np.random.randint(s1_ind, vidlen)
-        video = torch.FloatTensor(ims).permute(0, 3, 1, 2)
-
-        im0 = self.aug(self.preprocess(video[start_ind]) / 255.0 ) * 255.0
-        img = self.aug(self.preprocess(video[end_ind]) / 255.0 ) * 255.0
-        imts0 = self.aug(self.preprocess(video[s0_ind]) / 255.0 ) * 255.0
-        imts1 = self.aug(self.preprocess(video[s1_ind]) / 255.0 ) * 255.0
-        imts2 = self.aug(self.preprocess(video[s2_ind]) / 255.0 ) * 255.0
-        state = self.all_states[vid, s1_ind]
-        label = self.all_labels[vid]
-        if self.gt:
-            return (im0, img, imts0, imts1, imts2, state)
-        else:
-            return (im0, img, imts0, imts1, imts2, label)
-
-    def __iter__(self):
-        while True:
-            yield self._sample()
-
-
-## Data Loader for SthSth Data
-class VideoBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha):
-        self._num_workers = max(1, num_workers)
-        self.alpha = alpha
-        self.source = source1
-        
-        # Preprocess
-        self.preprocess = torch.nn.Sequential(
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                )
-
-        ## Augment when training
-        if self.source == "train":
-            self.aug = torch.nn.Sequential(
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
-                    transforms.RandomAffine(20, translate=(0.2, 0.2), scale=(0.8, 1.2)),
-                )
-        else:
-            self.aug = lambda a : a
-
-        # Load Data
-        self.dt = pd.read_csv(f"/datasets01/SSV2/{source1}.csv", sep=" ")
-        self.labels = {}
-        f = open(f"/datasets01/SSV2/something-something-v2-{source2}.json")
-        for label in json.load(f):
-            self.labels[label["id"]] = label["label"]
-
-    def _sample(self):
-        vid = np.random.choice(self.dt["original_vido_id"])
-        vidlen = self.dt.loc[self.dt["original_vido_id"] == vid]["frame_id"].max()
-        start_ind = np.random.randint(1, 2 + int(self.alpha * vidlen))
-        end_ind = np.random.randint(int((1-self.alpha) * vidlen)-1, vidlen)
-        im0 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{start_ind:06}.jpg')) / 255.0) * 255.0
-        img = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{end_ind:06}.jpg')) / 255.0) * 255.0
-
-        s1_ind = np.random.randint(2, vidlen)
-        s0_ind = np.random.randint(1, s1_ind)
-        s2_ind = np.random.randint(s1_ind, vidlen+1)
-        imts0 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s0_ind:06}.jpg')) / 255.0) * 255.0
-        imts1 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s1_ind:06}.jpg')) / 255.0) * 255.0
-        imts2 = self.aug(self.preprocess(torchvision.io.read_image(f'/datasets01/SSV2/frames/{vid}/{vid}_{s2_ind:06}.jpg')) / 255.0) * 255.0
-
-        label = self.labels[str(vid)]
-        return (im0, img, imts0, imts1, imts2, label)
-
-    def __iter__(self):
-        while True:
-            yield self._sample()
-
-
 class Workspace:
     def __init__(self, cfg):
         self.work_dir = Path.cwd()
@@ -272,31 +51,27 @@ class Workspace:
         self.setup()
 
         print("Creating Dataloader")
-        if self.cfg.dataset == "ego4d":
-            train_iterable = Ego4DBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha, 
-                    num_same=self.cfg.num_same, simclr = (self.cfg.simclr))
-            ## Ego4D Val set is WIP
-            # val_iterable = train_iterable
-        elif self.cfg.dataset == "gt":
-            shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
-            train_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
-                     alpha = self.cfg.alpha, shuf = shuf, gt = self.cfg.agent.gt)
-            alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
-            val_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "val", "validation",
-                     alpha=0, shuf = shuf, gt = self.cfg.agent.gt, alldata=alldata)
-        else:
-            train_iterable = VideoBuffer(self.cfg.replay_buffer_num_workers, "train", "train", alpha = self.cfg.alpha)
-            val_iterable = VideoBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", alpha=0)
+        if self.cfg.dataset == "robonet":
+            sources = ["robonet"]
+        elif self.cfg.dataset == "ego4d":
+            sources = ["ego4d"]
+        elif self.cfg.dataset == "sthsth":
+            sources = ["sthsth"]
+        elif self.cfg.dataset == "allhuman":
+            sources = ["sthsth", "ego4d"]
+        elif self.cfg.dataset == "all":
+            sources = ["sthsth", "robonet", "ego4d"]
+
+        train_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "train", "train", 
+                                    alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = self.cfg.simclr)
+        val_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", 
+                                    alpha = 0, datasources=sources, doaug = 0, simclr = self.cfg.simclr)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
                                          num_workers=self.cfg.replay_buffer_num_workers,
                                          pin_memory=True))
-        if self.cfg.dataset == "ego4d":
-            ## Ego4D Val set is WIP
-            self.val_loader = self.train_loader
-        else:
-            self.val_loader = iter(torch.utils.data.DataLoader(val_iterable,
+        self.val_loader = iter(torch.utils.data.DataLoader(val_iterable,
                                          batch_size=self.cfg.batch_size,
                                          num_workers=self.cfg.replay_buffer_num_workers,
                                          pin_memory=True))
@@ -407,7 +182,17 @@ def main(cfg):
     from train_representation import Workspace as W
     root_dir = Path.cwd()
     workspace = W(cfg)
-    snapshot = root_dir / 'snapshot.pt'
+
+    restore_dir = ""
+    # restore_dir = "/checkpoint/surajn/drqoutput/train_representation/2022-01-10_21-13-39"
+    if restore_dir != "":
+        last = str(root_dir.resolve()).split("/")[-1]
+        snapshot = Path(f"{restore_dir}/{last}/snapshot.pt")
+        print(snapshot)
+        print("***")
+        # assert(snapshot.exists())
+    else:
+        snapshot = root_dir / 'snapshot.pt'
     if snapshot.exists():
         print(f'resuming: {snapshot}')
         workspace.load_snapshot(snapshot)
