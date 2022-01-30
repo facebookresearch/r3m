@@ -56,7 +56,16 @@ class LanguageReward(nn.Module):
                                 nn.ReLU(inplace=True),
                                 nn.Linear(hidden_dim, im_dim))
         elif self.ltype == "lorel":
+            # self.pred = nn.Sequential(nn.Linear(im_dim * 2 + lang_dim, hidden_dim),
+            #                         nn.ReLU(inplace=True),
+            #                         nn.Linear(hidden_dim, hidden_dim),
+            #                         nn.ReLU(inplace=True),
+            #                         nn.Linear(hidden_dim, 1))
             self.pred = nn.Sequential(nn.Linear(im_dim * 2 + lang_dim, hidden_dim),
+                                    nn.ReLU(inplace=True),
+                                    nn.Linear(hidden_dim, hidden_dim),
+                                    nn.ReLU(inplace=True),
+                                    nn.Linear(hidden_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
@@ -75,7 +84,8 @@ class LanguageReward(nn.Module):
             info["target"] = target
             return self.sim(target, eg), info
         elif self.ltype == "lorel":
-            return self.sigm(self.pred(torch.cat([e0, eg, le], -1))), info
+            # return self.sigm(self.pred(torch.cat([e0, eg, le], -1))).squeeze(), info
+            return self.pred(torch.cat([e0, eg, le], -1)).squeeze(), info
         elif self.ltype == "reconstruct":
             lpred =  self.pred(torch.cat([e0, eg], -1))
             info["lpred"] = lpred

@@ -25,7 +25,7 @@ class R3M(nn.Module):
     def __init__(self, device, lr, hidden_dim, finetune=1, pretrained=0, size=34, l2weight=1.0, l1weight=1.0, 
                  langweight=1.0, tcnweight=0.0, structured=False, lang_cond=False, 
                  l2dist=True, attntype="modulate", finetunelang=0, simclr=False, bs=16,
-                 cpcweight = 0.0, num_same=1, langtype="reconstruct", anneall1=False, mask=True):
+                 num_same=1, langtype="reconstruct", anneall1=False, mask=True):
         super().__init__()
 
         self.device = device
@@ -36,7 +36,6 @@ class R3M(nn.Module):
         self.anneall1 = anneall1 ## Anneal up L1 Penalty
         self.lang_cond = lang_cond ## Language conditioned or not
         self.tcnweight = tcnweight ## Weight on TCN loss (states closer in same clip closer in embedding)
-        self.cpcweight = cpcweight ## Weight on CPC loss (states within same clip closer than other clips)
         self.num_same = num_same ## How many clips from same scene per batch
         self.finetunelang = finetunelang ## Finetune language model
         self.l2dist = l2dist ## Use -l2 or cosine sim
@@ -135,6 +134,7 @@ class R3M(nn.Module):
         if self.mask:
             a = self.sigm(self.m.to(e.device).unsqueeze(0).repeat(e.shape[0], 1))
             e = e * a
+
         return e, a
 
     def get_reward(self, e0, es, sentences):

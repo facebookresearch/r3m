@@ -11,7 +11,7 @@ load_snap: ""
 replay_buffer_num_workers: 10
 nstep: 3
 batch_size: 32 #256
-train_steps: 1000000
+train_steps: 2000000
 eval_freq: 20000
 num_same: 1
 # misc
@@ -30,6 +30,7 @@ alpha: 0.2
 dataset: "sthsth"
 wandbproject: drq_rep
 simclr: false
+doaug: "none"
 
 
 agent:
@@ -44,7 +45,6 @@ agent:
   l1weight: 0.00001
   anneall1: false
   tcnweight: 1.0
-  cpcweight: 0.5
   langweight: 0.0
   structured: true
   lang_cond: false
@@ -53,6 +53,6 @@ agent:
   finetunelang: false
   num_same: ${num_same}
   langtype: reconstruct
-  mask: true
+  mask: false
   simclr: ${simclr}
   bs: ${batch_size}
