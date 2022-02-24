@@ -143,10 +143,10 @@ class R3M(nn.Module):
 
     ## Forward Call (im --> representation)
     def forward(self, obs, sentences = None, num_ims = 1, obs_shape = [3, 224, 224]):
-        ## If proprioceptive data is stacked at front of obs
-        if self.proprio_shape > 0:
-            proprio = obs[:, -self.proprio_shape:]
-            obs = obs[:, :-self.proprio_shape].reshape([obs.shape[0]] + list(obs_shape))
+        ## If proprioceptive data is stacked at end of obs
+        # if self.proprio_shape > 0:
+        #     proprio = obs[:, -self.proprio_shape:]
+        #     obs = obs[:, :-self.proprio_shape].reshape([obs.shape[0]] + list(obs_shape))
 
         if obs_shape != [3, 224, 224]:
             preprocess = nn.Sequential(
@@ -174,8 +174,8 @@ class R3M(nn.Module):
         h = h.view(h.shape[0], -1)
 
         ## Add back proprioception if there
-        if self.proprio_shape > 0:
-            h = torch.cat([h, proprio], -1)
+        # if self.proprio_shape > 0:
+        #     h = torch.cat([h, proprio], -1)
         return (h, a)
 
     def sim(self, tensor1, tensor2):
