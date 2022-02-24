@@ -11,47 +11,50 @@ load_snap: ""
 replay_buffer_num_workers: 10
 nstep: 3
 batch_size: 32 #256
-train_steps: 1000000
+train_steps: 2000000
 eval_freq: 20000
+num_same: 1
 # misc
 seed: 1
 device: cuda
 save_video: true
 save_train_video: false
-use_tb: false
 # experiment
 experiment: train_rep_0929_sweep
 # agent
-lr: 1e-3
-feature_dim: 50
+lr: 1e-4
 # lowdim
 lowdim: 0
 # data
 alpha: 0.2
-wandbproject: reward_viz
-dataset: gt
+dataset: "sthsth"
+wandbproject: drq_rep
+simclr: false
+doaug: "none"
+view: default
+task: kitchen_knob1_on-v3
+
 
 agent:
-  _target_: models.Representation
+  _target_: robolang_rep.R3M
   device: ${device}
   lr: ${lr}
-  use_tb: ${use_tb}
   hidden_dim: 1024
-  feature_dim: ${feature_dim}
   finetune: 1
   pretrained: 0
   size: 34
   l2weight: 0.00001
+  l1weight: 0.00001
+  anneall1: false
   tcnweight: 1.0
-  cpcweight: 1.0
   langweight: 0.0
-  langrecweight: 0.0
   structured: true
   lang_cond: false
   l2dist: true
-  # sanity check
-  gt: false
   attntype: modulate
   finetunelang: false
-  lsize: 32
-  distributed: false
+  num_same: ${num_same}
+  langtype: reconstruct
+  mask: false
+  simclr: ${simclr}
+  bs: ${batch_size}

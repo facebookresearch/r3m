@@ -91,7 +91,7 @@ class Ego4DBuffer(IterableDataset):
 
 ## Data Loader for Ground Truth Franka Kitchen Demo Data
 class MWBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, shuf, gt=False, alldata=None):
+    def __init__(self, num_workers, source1, source2, alpha, shuf, gt=False, alldata=None, view=None, task=None):
         self._num_workers = max(1, num_workers)
         self.alpha = alpha
         self.source = source1
@@ -114,9 +114,9 @@ class MWBuffer(IterableDataset):
             self.aug = lambda a : a
 
         # Load Data
-        self.cams = ["default", "left_cap2", "right_cap2"]
+        self.cams = ["top_cap2", "left_cap2", "right_cap2"] #[view] #
         self.tasks = ["assembly-v2-goal-observable","bin-picking-v2-goal-observable","button-press-topdown-v2-goal-observable",
-                "drawer-open-v2-goal-observable","hammer-v2-goal-observable"] #,"kitchen_rdoor_open-v3"]
+                "drawer-open-v2-goal-observable","hammer-v2-goal-observable"] #,"kitchen_rdoor_open-v3"] [task] #
         self.instr = ["Inserting the ring into the peg", "Picking the block and placing it into the other bin", 
                 "Pressing the red button",  "Opening the drawer", 
                 "Hammering the nail into the wood"] #, "Opening the middle door"]
@@ -126,7 +126,7 @@ class MWBuffer(IterableDataset):
             all_demos = []
             all_labels = []
             all_states = []
-            for camera in ["top_cap2", "left_cap2", "right_cap2"]:
+            for camera in self.cams:
                 for i, t in enumerate(self.tasks):
                     path = f"/private/home/surajn/code/vrl_private/vrl/hydra/expert_data/final_paths_multiview_meta_200/{camera}/{t}.pickle"
                     demo_paths = pickle.load(open(path, 'rb'))
@@ -183,7 +183,7 @@ class MWBuffer(IterableDataset):
 
 ## Data Loader for Ground Truth Franka Kitchen Demo Data
 class GTBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, shuf, gt=False, alldata=None):
+    def __init__(self, num_workers, source1, source2, alpha, shuf, gt=False, alldata=None, view=None, task=None):
         self._num_workers = max(1, num_workers)
         self.alpha = alpha
         self.source = source1
@@ -206,10 +206,9 @@ class GTBuffer(IterableDataset):
             self.aug = lambda a : a
 
         # Load Data
-        self.cams = ["default", "left_cap2", "right_cap2"]
-        self.tasks = ["kitchen_knob1_on-v3","kitchen_light_on-v3","kitchen_sdoor_open-v3",
-                "kitchen_micro_open-v3","kitchen_ldoor_open-v3"]#,"kitchen_rdoor_open-v3"]
-        self.instr = ["Turning the top left knob clockwise", "Switching the light on", 
+        self.cams = ["default", "left_cap2", "right_cap2"] #[view] 
+        self.tasks = ["kitchen_knob1_on-v3","kitchen_light_on-v3","kitchen_sdoor_open-v3","kitchen_micro_open-v3","kitchen_ldoor_open-v3"] #[task] 
+        self.instr = ["Turning the bottom right knob clockwise", "Switching the light on", 
                 "Sliding the top right door open", "Opening the microwave", 
                 "Opening the top left door"] #, "Opening the middle door"]
         if alldata is not None:
@@ -218,11 +217,11 @@ class GTBuffer(IterableDataset):
             all_demos = []
             all_labels = []
             all_states = []
-            for camera in ["default", "left_cap2", "right_cap2"]:
+            for camera in self.cams:
                 for i, t in enumerate(self.tasks):
                     path = f"/private/home/surajn/code/vrl_private/vrl/hydra/expert_data/final_paths_multiview_rb_200/{camera}/{t}.pickle"
                     demo_paths = pickle.load(open(path, 'rb'))
-                    demo_paths = demo_paths[:1000]
+                    demo_paths = demo_paths[:200]
                     print(len(demo_paths), i, t)
                     for p in demo_paths:
                         all_demos.append(p["images"])
@@ -290,18 +289,20 @@ class Workspace:
             val_iterable = train_iterable
         elif self.cfg.dataset == "gt":
             shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
+            # shuf = np.random.choice(200*3, 200*3, replace=False)
             train_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
-                     alpha = self.cfg.alpha, shuf = shuf, gt = 0)
+                     alpha = self.cfg.alpha, shuf = shuf, gt = 0, view=self.cfg.view, task=self.cfg.task)
             alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
             val_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "val", "validation",
-                     alpha=0, shuf = shuf, gt = 0, alldata=alldata)
+                     alpha=0, shuf = shuf, gt = 0, alldata=alldata, view=self.cfg.view, task=self.cfg.task)
         elif self.cfg.dataset == "mw":
             shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
+            # shuf = np.random.choice(200, 200, replace=False)
             train_iterable = MWBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
-                     alpha = self.cfg.alpha, shuf = shuf, gt = 0)
+                     alpha = self.cfg.alpha, shuf = shuf, gt = 0, view=self.cfg.view, task=self.cfg.task)
             alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
             val_iterable = MWBuffer(self.cfg.replay_buffer_num_workers, "val", "validation",
-                     alpha=0, shuf = shuf, gt = 0, alldata=alldata)
+                     alpha=0, shuf = shuf, gt = 0, alldata=alldata, view=self.cfg.view, task=self.cfg.task)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
@@ -311,6 +312,7 @@ class Workspace:
                                          batch_size=self.cfg.batch_size,
                                          num_workers=self.cfg.replay_buffer_num_workers,
                                          pin_memory=True))
+        self.instr = val_iterable.instr
 
 
 
@@ -349,6 +351,98 @@ class Workspace:
             self._replay_iter = iter(self.replay_loader)
         return self._replay_iter
 
+
+    def plot_goal_dist(self, goal, demos, model, langs):
+        rs= []
+        rns = []
+        pixrs= []
+        pixrns = []
+        cliprs= []
+        cliprns = []
+        maps = {}
+        import clip
+        clipmodel, _ = clip.load("RN50", device="cuda")
+        import torchvision.transforms as T
+        # cliptransforms = T.Compose([T.Resize(224),
+        #                         T.CenterCrop(224),
+        #                         T.ToTensor(), # ToTensor() divides by 255
+        #                         T.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])])
+
+        cliptransforms = T.Compose([T.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])])
+
+        print(goal.shape, demos.shape)
+        print(goal.min(), goal.max(), demos.min(), demos.max())
+        for ts in range(0, demos.shape[1]):
+            print(ts)
+            metric = {}
+            with torch.no_grad():
+                img = demos[:, -1] #goal.unsqueeze(0).repeat(demos.shape[0], 1, 1, 1)
+                imt = demos[:, ts]
+                imn = demos[:, ts]
+                eg = self.model(img)[0]
+                et = self.model(imt)[0]
+                en = self.model(imn)[0]
+                r = -torch.linalg.norm((eg-et), dim = -1)
+                r_n = -torch.linalg.norm((eg-en), dim = -1)
+
+                clipeg = clipmodel.encode_image(cliptransforms(img / 255.0))
+                clipet = clipmodel.encode_image(cliptransforms(imt / 255.0))
+                clipen = clipmodel.encode_image(cliptransforms(imn / 255.0))
+                # print(clipen.shape)
+                # print(clipen)
+                clipr = -torch.linalg.norm((clipeg-clipet), dim = -1)
+                clipr_n = -torch.linalg.norm((clipeg-clipen), dim = -1)
+
+                pixr = -torch.linalg.norm((img-imt), dim = ((1,2,3)))
+                pixr_n = -torch.linalg.norm((imt-imn), dim = ((1,2,3)))
+
+                rs.append(r.cpu().detach().numpy())
+                rns.append(r_n.cpu().detach().numpy())
+                
+                pixrs.append(pixr.cpu().detach().numpy())
+                pixrns.append(pixr_n.cpu().detach().numpy())
+
+                cliprs.append(clipr.cpu().detach().numpy())
+                cliprns.append(clipr_n.cpu().detach().numpy())
+        rs = np.stack(rs, -1)
+        rs = rs - rs.min()
+        rs = rs / rs.max()
+        rse = rs.std(0) / np.sqrt(rs.shape[0])
+        rs = rs.mean(0)
+        # rns = np.stack(rns, -1)
+        pixrs = np.stack(pixrs, -1)
+        pixrs = pixrs - pixrs.min()
+        pixrs = pixrs / pixrs.max()
+        pixrse = pixrs.std(0) / np.sqrt(pixrs.shape[0])
+        pixrs = pixrs.mean(0)
+
+        cliprs = np.stack(cliprs, -1)
+        cliprs = cliprs - cliprs.min()
+        cliprs = cliprs / cliprs.max()
+        cliprse = cliprs.std(0) / np.sqrt(cliprs.shape[0])
+        cliprs = cliprs.mean(0)
+        # pixrns = np.stack(pixrns, -1)
+        print(rs.shape, pixrs.shape, cliprs.shape)
+
+        for b in range(3):
+            filename = self.work_dir.joinpath(f"{b}_dem_{self.global_step}.gif")
+            from moviepy.editor import ImageSequenceClip
+            clip = ImageSequenceClip(list(demos[b].permute(0, 2, 3, 1).cpu().detach().numpy().astype(np.uint8)), fps=20)
+            clip.write_gif(filename, fps=20)
+            import matplotlib.pyplot as plt
+            
+        plt.plot(rs, label=f"R3M", color="red")
+        plt.fill_between(range(0, 50), rs-rse, rs+rse, color="red", alpha=0.1)
+        plt.plot(pixrs,  label=f"Pixel", color="blue")
+        plt.fill_between(range(0, 50), pixrs-pixrse, pixrs+pixrse, color="blue", alpha=0.1)
+        plt.plot(cliprs,  label=f"CLIP", color="green")
+        plt.fill_between(range(0, 50), cliprs-cliprse, cliprs+cliprse, color="green", alpha=0.1)
+        # plt.plot(cliprs[b], label=f"True Demo {batch_langs[b]} (CLIP)")
+        plt.legend()
+        plt.savefig(self.work_dir.joinpath(f"{b}_rew_{self.global_step}.png"))
+        plt.close()
+        assert(False)
+
     def train(self):
         # predicates
         train_until_step = utils.Until(self.cfg.train_steps,
@@ -361,12 +455,12 @@ class Workspace:
         ## Training Loop
         print("Begin Training")
         batch_vids, batch_langs = next(self.val_loader)
-        batch_langs_shuf1 = copy.deepcopy(batch_langs)
-        random.shuffle(batch_langs_shuf1)
-        batch_langs_shuf2 = copy.deepcopy(batch_langs)
-        random.shuffle(batch_langs_shuf2)
-        batch_langs_shuf3 = copy.deepcopy(batch_langs)
-        random.shuffle(batch_langs_shuf3)
+        # batch_langs_shuf1 = copy.deepcopy(batch_langs)
+        # random.shuffle(batch_langs_shuf1)
+        # batch_langs_shuf2 = copy.deepcopy(batch_langs)
+        # random.shuffle(batch_langs_shuf2)
+        # batch_langs_shuf3 = copy.deepcopy(batch_langs)
+        # random.shuffle(batch_langs_shuf3)
         batch_vids = batch_vids.cuda()
 
         # batch_vids_shuf = []
@@ -379,17 +473,70 @@ class Workspace:
 
         t1 = time.time()
         self.model.eval()
+
+        self.plot_goal_dist(batch_vids[0, -1], batch_vids[1:], self.model, batch_langs)
+        assert(False)
+
         rs= []
         rns = []
+        pixrs= []
+        pixrns = []
+        cliprs= []
+        cliprns = []
         maps = {}
+
+        # for iss in self.instr:
+        #     print(iss)
+        #     r, _ = self.model.module.get_reward(self.model(batch_vids[:, 5])[0], self.model(batch_vids[:, -5])[0], [iss]*batch_vids.shape[0])
+        #     print(r.shape)
+        #     for b in range(batch_vids.shape[0]):
+        #         self.work_dir.joinpath(f"{iss}").mkdir(parents=True, exist_ok=True)
+        #         filename = self.work_dir.joinpath(f"{iss}/score_{r[b]:.6}.gif")
+        #         from moviepy.editor import ImageSequenceClip
+        #         clip = ImageSequenceClip(list(batch_vids[b].permute(0, 2, 3, 1).cpu().detach().numpy().astype(np.uint8)), fps=20)
+        #         clip.write_gif(filename, fps=20)
+
+        # assert(False)
+
+        import clip
+        clipmodel, _ = clip.load("RN50", device="cuda")
+        import torchvision.transforms as T
+        cliptransforms = T.Compose([T.Resize(224),
+                                T.CenterCrop(224),
+                                T.ToTensor(), # ToTensor() divides by 255
+                                T.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])])
+
         for ts in range(0, batch_vids.shape[1]):
             print(ts)
             metric = {}
+            # with torch.no_grad():
+            #     r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
+            #     # r_n1, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf1)
+            #     # r_n2, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf2)
+            #     # r_n3, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf3)
+            #     r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
+
             with torch.no_grad():
-                r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
-                r_n1, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf1)
-                r_n2, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf2)
-                r_n3, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf3)
+                img = batch_vids[:, -1]
+                imt = batch_vids[:, ts]
+                imn = batch_vids_shuf[:, ts]
+                eg = self.model(img)[0]
+                et = self.model(imt)[0]
+                en = self.model(imn)[0]
+                r = -torch.linalg.norm((eg-et), dim = -1)
+                r_n4 = -torch.linalg.norm((eg-en), dim = -1)
+
+                clipeg = clipmodel.encode_image(cliptransforms(img))
+                clipet = clipmodel.encode_image(cliptransforms(imt))
+                clipen = clipmodel.encode_image(cliptransforms(imn))
+                print(clipen.shape)
+                print(clipen)
+                clipr = -torch.linalg.norm((clipeg-clipet), dim = -1)
+                clipr_n4 = -torch.linalg.norm((clipeg-clipen), dim = -1)
+
+                pixr = -torch.linalg.norm((img-imt), dim = ((1,2,3)))
+                pixr_n4 = -torch.linalg.norm((imt-imn), dim = ((1,2,3)))
+                # r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
                 # r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
 
             target_layers = [self.model.module.convnet.layer1[0]]
@@ -422,15 +569,31 @@ class Workspace:
                     # cv2.imwrite(f'{dirname}/{ts}.jpg', c)
                 
 
-            r_n = torch.stack([r_n1, r_n2, r_n3], -1)
-            print(r, r_n)
+            r_n = r_n4 # torch.stack([r_n1, r_n2, r_n3], -1)
+            print(r, pixr, clipr)
             metric["rew_pos"] = r.mean()
             metric["rew_neg"] = r_n.mean()
             rs.append(r.cpu().detach().numpy())
             rns.append(r_n.cpu().detach().numpy())
+            
+            pixrs.append(pixr.cpu().detach().numpy())
+            pixrns.append(pixr_n4.cpu().detach().numpy())
+
+            cliprs.append(clipr.cpu().detach().numpy())
+            cliprns.append(clipr_n4.cpu().detach().numpy())
             self.logger.log_metrics(metric, ts, ty='train')
         rs = np.stack(rs, -1)
-        rns = np.stack(rns, -1)
+        rs = rs - rs.min()
+        rs = rs / rs.max()
+        # rns = np.stack(rns, -1)
+        pixrs = np.stack(pixrs, -1)
+        pixrs = pixrs - pixrs.min()
+        pixrs = pixrs / pixrs.max()
+
+        cliprs = np.stack(cliprs, -1)
+        cliprs = cliprs - cliprs.min()
+        cliprs = cliprs / cliprs.max()
+        # pixrns = np.stack(pixrns, -1)
 
         for b in range(batch_vids.shape[0]):
             filename = self.work_dir.joinpath(f"{b}_dem_{self.global_step}.gif")
@@ -443,11 +606,16 @@ class Workspace:
             clipmap.write_gif(filename, fps=20)
 
             import matplotlib.pyplot as plt
-            plt.plot(rs[b], label=batch_langs[b])
-            plt.plot(rns[b, 0], label=batch_langs_shuf1[b])
-            plt.plot(rns[b, 1], label=batch_langs_shuf2[b])
-            plt.plot(rns[b, 2], label=batch_langs_shuf3[b])
-            # plt.plot(rns[b, 3], label="Different Demo")
+            
+            # plt.plot(rns[b], label=batch_langs_shuf1[b])
+            # plt.plot(rns[b, 1], label=batch_langs_shuf2[b])
+            # plt.plot(rns[b, 2], label=batch_langs_shuf3[b])
+            plt.plot(rs[b], label=f"True Demo {batch_langs[b]} (R3M)")
+            # plt.plot(rns[b], label="Different Demo (R3M)")
+            plt.plot(pixrs[b], label=f"True Demo {batch_langs[b]} (Pixel)")
+
+            plt.plot(cliprs[b], label=f"True Demo {batch_langs[b]} (CLIP)")
+            # plt.plot(pixrns[b], label="Different Demo (Pixel)")
             plt.legend()
             plt.savefig(self.work_dir.joinpath(f"{b}_rew_{self.global_step}.png"))
             plt.close()
@@ -470,7 +638,7 @@ class Workspace:
         except:
             print("No global step found")
 
-@hydra.main(config_path='cfgs', config_name='config_rep')
+@hydra.main(config_path='cfgs', config_name='config_rew_viz')
 def main(cfg):
     from reward_viz import Workspace as W
     root_dir = Path.cwd()
