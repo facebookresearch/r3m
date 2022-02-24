@@ -79,7 +79,6 @@ class Trainer():
         if model.module.langweight > 0:
             num_neg = 3
             # b_lang_shuf = copy.deepcopy(b_lang)
-
             sim_pos1, _ = model.module.get_reward(e0, eg, b_lang)
             sim_pos2, _ = model.module.get_reward(e0, es1, b_lang)
             sim_pos3, _ = model.module.get_reward(e0, es2, b_lang)
@@ -91,6 +90,9 @@ class Trainer():
             sim_negs3.append(model.module.get_reward(e0, es1, b_lang)[0])
             for _ in range(num_neg):
                 # random.shuffle(b_lang_shuf)
+                # sim_negs1.append(model.module.get_reward(e0, eg, b_lang_shuf)[0])
+                # sim_negs2.append(model.module.get_reward(e0, es1, b_lang_shuf)[0])
+                # sim_negs3.append(model.module.get_reward(e0, es2, b_lang_shuf)[0])
                 negvidid = torch.randperm(e0.size()[0])
                 sim_negs1.append(model.module.get_reward(e0[negvidid], eg[negvidid], b_lang)[0])
                 negvidid = torch.randperm(e0.size()[0])
@@ -108,8 +110,9 @@ class Trainer():
             rewloss2 = -torch.log(epsilon + (torch.exp(sim_pos2) / (epsilon + torch.exp(sim_pos2) + sim_negs_exp2.sum(-1))))
             rewloss3 = -torch.log(epsilon + (torch.exp(sim_pos3) / (epsilon + torch.exp(sim_pos3) + sim_negs_exp3.sum(-1))))
             rewloss = (rewloss1 + rewloss2 + rewloss3) / 3
-            mask = torch.FloatTensor([1.0 * (b != "") for b in b_lang]).cuda()
-            ### Mask out examples without language
+            ### Mask out videos without language
+            with torch.no_grad():
+                mask = torch.FloatTensor([1.0 * (b != "") for b in b_lang]).cuda()
             rewloss = rewloss * mask
             rewloss = rewloss.mean()
             lacc1 = (1.0 * (sim_negs1.max(-1)[0] < sim_pos1)).mean()
