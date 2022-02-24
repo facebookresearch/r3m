@@ -184,7 +184,7 @@ def main(cfg):
     workspace = W(cfg)
 
     restore_dir = ""
-    # restore_dir = "/checkpoint/surajn/drqoutput/train_representation/2022-01-10_21-13-39"
+    # restore_dir = "/checkpoint/surajn/drqoutput/train_representation/2022-02-02_23-00-44"
     if restore_dir != "":
         last = str(root_dir.resolve()).split("/")[-1]
         snapshot = Path(f"{restore_dir}/{last}/snapshot.pt")
