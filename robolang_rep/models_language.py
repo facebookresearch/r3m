@@ -17,11 +17,12 @@ class LangEncoder(nn.Module):
     self.finetune = finetune
     self.scratch = scratch # train from scratch vs load weights
     self.device = "cuda"
-    self.tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    self.modelname = "distilbert-base-uncased" #"roberta-base" #"distilbert-base-uncased"
+    self.tokenizer = AutoTokenizer.from_pretrained(self.modelname)
     if not self.scratch:
-      self.model = AutoModel.from_pretrained("distilbert-base-uncased").to('cuda')
+      self.model = AutoModel.from_pretrained(self.modelname).to('cuda')
     else:
-      self.model = AutoModel.from_config(config = AutoConfig.from_pretrained("distilbert-base-uncased")).to('cuda')
+      self.model = AutoModel.from_config(config = AutoConfig.from_pretrained(self.modelname)).to('cuda')
     self.lang_size = 768
       
   def forward(self, langs):
@@ -34,13 +35,17 @@ class LangEncoder(nn.Module):
       encoded_input = self.tokenizer(langs, return_tensors='pt', padding=True)
       input_ids = encoded_input['input_ids'].to(self.device)
       attention_mask = encoded_input['attention_mask'].to(self.device)
-      lang_embedding = self.model(input_ids, attention_mask=attention_mask)[0][:, -1]
+      lang_embedding = self.model(input_ids, attention_mask=attention_mask).last_hidden_state
+      lang_embedding = lang_embedding.mean(1)
+      # lang_embedding = lang_embedding[:, -1]
     else:
       with torch.no_grad():
         encoded_input = self.tokenizer(langs, return_tensors='pt', padding=True)
         input_ids = encoded_input['input_ids'].to(self.device)
         attention_mask = encoded_input['attention_mask'].to(self.device)
-        lang_embedding = self.model(input_ids, attention_mask=attention_mask)[0][:, -1]
+        lang_embedding = self.model(input_ids, attention_mask=attention_mask).last_hidden_state
+        lang_embedding = lang_embedding.mean(1)
+        # lang_embedding = lang_embedding[:, -1]
     return lang_embedding
 
 class LanguageReward(nn.Module):
@@ -56,11 +61,6 @@ class LanguageReward(nn.Module):
                                 nn.ReLU(inplace=True),
                                 nn.Linear(hidden_dim, im_dim))
         elif self.ltype == "lorel":
-            # self.pred = nn.Sequential(nn.Linear(im_dim * 2 + lang_dim, hidden_dim),
-            #                         nn.ReLU(inplace=True),
-            #                         nn.Linear(hidden_dim, hidden_dim),
-            #                         nn.ReLU(inplace=True),
-            #                         nn.Linear(hidden_dim, 1))
             self.pred = nn.Sequential(nn.Linear(im_dim * 2 + lang_dim, hidden_dim),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(hidden_dim, hidden_dim),
@@ -84,7 +84,6 @@ class LanguageReward(nn.Module):
             info["target"] = target
             return self.sim(target, eg), info
         elif self.ltype == "lorel":
-            # return self.sigm(self.pred(torch.cat([e0, eg, le], -1))).squeeze(), info
             return self.pred(torch.cat([e0, eg, le], -1)).squeeze(), info
         elif self.ltype == "reconstruct":
             lpred =  self.pred(torch.cat([e0, eg], -1))
