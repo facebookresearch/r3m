@@ -5,7 +5,7 @@ api = wandb.Api()
 entity, project = "surajnfb", "bc"  # set to your entity and project 
 runs = api.runs(entity + "/" + project) 
 
-names = ["BC_0210"]
+names = ["BC_0223"]
 summary_list, config_list, name_list = [], [], []
 i = 0
 everythingdict = {
@@ -93,5 +93,7 @@ for run in runs:
     i += 1
 
 runs_df = pd.DataFrame(everythingdict)
+dfc = runs_df.groupby(['load_path', "finetune", "env"]).count().reset_index()
+print(dfc)
 
-runs_df.to_csv("BC_0210.csv")
+runs_df.to_csv("BC_0223.csv")
