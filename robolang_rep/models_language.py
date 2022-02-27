@@ -17,7 +17,7 @@ class LangEncoder(nn.Module):
     self.finetune = finetune
     self.scratch = scratch # train from scratch vs load weights
     self.device = "cuda"
-    self.modelname = "distilbert-base-uncased" #"roberta-base" #"distilbert-base-uncased"
+    self.modelname = "distilbert-base-uncased"
     self.tokenizer = AutoTokenizer.from_pretrained(self.modelname)
     if not self.scratch:
       self.model = AutoModel.from_pretrained(self.modelname).to('cuda')
