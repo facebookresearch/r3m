@@ -21,7 +21,7 @@ from torch.utils.data import IterableDataset
 import pandas as pd
 from robolang_rep import utils
 from robolang_rep.trainer import Trainer
-from robolang_rep.data_loaders import R3MBuffer, RoboNetBuffer, Ego4DBuffer, GTBuffer, VideoBuffer
+from robolang_rep.data_loaders import R3MBuffer
 from logger import Logger
 import json
 import time
@@ -63,9 +63,9 @@ class Workspace:
             sources = ["sthsth", "robonet", "ego4d"]
 
         train_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "train", "train", 
-                                    alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = self.cfg.simclr)
+                                    alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = 0)
         val_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", 
-                                    alpha = 0, datasources=sources, doaug = 0, simclr = self.cfg.simclr)
+                                    alpha = 0, datasources=sources, doaug = 0, simclr = 0)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
@@ -126,16 +126,9 @@ class Workspace:
         while train_until_step(self.global_step):
             ## Sample Batch
             t0 = time.time()
-            
-            if self.cfg.simclr:
-                bf1, bf2 = next(self.train_loader)
-                t1 = time.time()
-                batch = (bf1.cuda(), bf2.cuda())
-                metrics, st = trainer.update_simclr(self.model, batch, self.global_step)
-            else:
-                batch_f, batch_langs = next(self.train_loader)
-                t1 = time.time()
-                metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step)
+            batch_f, batch_langs = next(self.train_loader)
+            t1 = time.time()
+            metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step)
             t2 = time.time()
             self.logger.log_metrics(metrics, self.global_frame, ty='train')
 
@@ -146,14 +139,8 @@ class Workspace:
                 
             if eval_every_step(self.global_step):
                 with torch.no_grad():
-                    
-                    if self.cfg.simclr:
-                        bf1, bf2 = next(self.val_loader)
-                        batch = (bf1.cuda(), bf2.cuda())
-                        metrics, st = trainer.update_simclr(self.model, batch, self.global_step, eval=True)
-                    else:
-                        batch_f, batch_langs = next(self.val_loader)
-                        metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)
+                    batch_f, batch_langs = next(self.val_loader)
+                    metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)
                     self.logger.log_metrics(metrics, self.global_frame, ty='eval')
                     print("EVAL", self.global_step, metrics)
 

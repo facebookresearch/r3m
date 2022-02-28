@@ -36,10 +36,7 @@ class Trainer():
         b_im, b_lang = batch
         t2 = time.time()
 
-        if model.module.lang_cond:
-            context = b_lang * 5
-        else:
-            context = None
+        context = None
 
         ## Encode Start and End Frames
         bs = b_im.shape[0]
@@ -57,21 +54,13 @@ class Trainer():
 
         ## LP Loss
         l2loss = torch.linalg.norm(alles, ord=2, dim=-1).mean()
-        if att is not None:
-            l1loss = torch.linalg.norm(att, ord=1, dim=-1).mean()
-            l0loss = torch.linalg.norm(att, ord=0, dim=-1).mean()
-        else:
-            l1loss = torch.linalg.norm(alles, ord=1, dim=-1).mean()
-            l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
+        l1loss = torch.linalg.norm(alles, ord=1, dim=-1).mean()
+        l0loss = torch.linalg.norm(alles, ord=0, dim=-1).mean()
         metrics['l2loss'] = l2loss.item()
         metrics['l1loss'] = l1loss.item()
         metrics['l0loss'] = l0loss.item()
         full_loss += model.module.l2weight * l2loss
-        if model.module.anneall1:
-            currl1weight = min(1.0, (step / 1000000.0)) * model.module.l1weight
-            full_loss += currl1weight * l1loss
-        else:
-            full_loss += model.module.l1weight * l1loss
+        full_loss += model.module.l1weight * l1loss
  
 
         t3 = time.time()
@@ -169,68 +158,6 @@ class Trainer():
             self.log_batch(b_im[:, 0], b_im[:, 1], b_im[:, 2], b_im[:, 3], b_im[:, 4], step, b_lang, eval, langstuff, smoothstuff)
         t7 = time.time()
         st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, TCN time {t6-t5}, Backprop time {t7-t6}"
-        return metrics, st
-
-    def update_simclr(self, model, batch, step, eval=False):
-        t0 = time.time()
-        metrics = dict()
-        if eval:
-            model.eval()
-        else:
-            model.train()
-
-        t1 = time.time()
-        ## Batch
-        imv1, imv2 = batch
-        t2 = time.time()
-
-        ## Encode Start and End Frames
-        bs = imv1.shape[0]
-        ### Order such that 5 states from same video are in order
-        ### That way, if split across gpus, still get distribution of time and video in each batch
-        ## Put positive examples on different GPU when multibatch to prevent cheating
-        bim = torch.stack([imv1, imv2], 0)
-        bim = bim.reshape(2*bs, 3, 224, 224)
-        contextlist = torch.tensor(range(0, bs*2))
-        alles, _ = model(bim)
-        alle = alles.reshape(2, bs, -1)
-        ev1 = alle[0]
-        ev2 = alle[1]
-
-        full_loss = 0
-
-        t3 = time.time()
-        ## SimCLR loss
-        temperature = 0.1
-        pos = model.module.sim(ev1, ev2) / temperature
-        neg = model.module.sim(ev1.repeat(bs, 1), ev1.repeat_interleave(bs, 0)) / temperature
-        neg = neg.reshape(bs, bs)
-        neg = neg.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
-
-        neg2 = model.module.sim(ev1.repeat(bs, 1), ev2.repeat_interleave(bs, 0)) / temperature
-        neg2 = neg2.reshape(bs, bs)
-        neg2 = neg2.masked_select(~torch.eye(bs, dtype=bool).cuda()).reshape((bs, bs-1))
-
-        contrastive_loss = -torch.log(epsilon + (torch.exp(pos) / 
-                    (epsilon + torch.exp(neg).sum(-1) + torch.exp(neg2).sum(-1) + torch.exp(pos)))).mean()
-        full_loss += contrastive_loss    
-        acc = (1.0 * ((pos > neg2.max(-1)[0]) * (pos > neg.max(-1)[0]))).mean()
-        metrics['contrastive_loss'] = contrastive_loss.item() 
-        metrics['acc'] = acc.item() 
-        
-        t4 = time.time()
-        metrics['full_loss'] = full_loss.item()
-        
-        t5 = time.time()
-        if not eval:
-            model.module.encoder_opt.zero_grad()
-            full_loss.backward()
-            model.module.encoder_opt.step()
-            model.module.sched.step()
-
-        t6 = time.time()
-        st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode time {t3-t2}, Loss time {t4-t3},  Backprop time {t6-t5}"
-
         return metrics, st
 
     ## Logging initial and final images and their language

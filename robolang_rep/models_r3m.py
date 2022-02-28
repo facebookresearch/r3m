@@ -16,7 +16,7 @@ from pathlib import Path
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import torchvision.transforms as T
-from robolang_rep.models_language import LangEncoder, LanguageReward, LanguageAttention
+from robolang_rep.models_language import LangEncoder, LanguageReward
 
 epsilon = 1e-8
 def do_nothing(x): return x
@@ -32,20 +32,11 @@ class R3M(nn.Module):
         self.use_tb = False
         self.l2weight = l2weight
         self.l1weight = l1weight
-        self.simclr = simclr
-        self.anneall1 = anneall1 ## Anneal up L1 Penalty
-        self.lang_cond = lang_cond ## Language conditioned or not
         self.tcnweight = tcnweight ## Weight on TCN loss (states closer in same clip closer in embedding)
-        self.num_same = num_same ## How many clips from same scene per batch
-        self.finetunelang = finetunelang ## Finetune language model
         self.l2dist = l2dist ## Use -l2 or cosine sim
-        self.mask = mask ## Learn Binary mask over image features
-        self.attntype = attntype ## Type of language-conditioned attention
-        self.langtype = langtype ## Type of language based reward
         self.langweight = langweight ## Weight on language reward
         self.size = size ## Size ResNet or ViT
         self.finetune = finetune ## Train Model
-        self.proprio_shape = 0 ## Amount of proprioceptive features at front of observation
 
         ## Distances and Metrics
         self.cs = torch.nn.CosineSimilarity(1)
@@ -55,9 +46,7 @@ class R3M(nn.Module):
         params = []
         ######################################################################## Sub Modules
         ## Pretrained DistilBERT Sentence Encoder
-        self.lang_enc = LangEncoder(self.finetunelang, 0) 
-        if self.finetunelang:
-            params += list(self.lang_enc.parameters())
+        self.lang_enc = LangEncoder(0, 0) 
 
         ## Visual Encoder
         if size == 18:
@@ -86,55 +75,21 @@ class R3M(nn.Module):
             self.convnet.eval()
         params += list(self.convnet.parameters())
         
-        ## IF REPRESENTATION IS LANGUAGE CONDITIONED
-        if self.lang_cond:
-            self.lang_attn = LanguageAttention(self.attntype, self.outdim, self.lang_enc.lang_size)
-            params += list(self.lang_attn.parameters())
-
         ## Language Reward
         if self.langweight > 0.0:
-            self.lang_rew = LanguageReward(self.langtype, self.outdim, hidden_dim, self.lang_enc.lang_size, simfunc=self.sim) 
+            self.lang_rew = LanguageReward(None, self.outdim, hidden_dim, self.lang_enc.lang_size, simfunc=self.sim) 
             params += list(self.lang_rew.parameters())
-
-        ## Sparsity Mask
-        if self.mask:
-            self.m = torch.rand(self.outdim, requires_grad=True, device="cuda")
-            params += list([self.m])
-        else:
-            self.m = None
         ########################################################################
 
-
-        #### SIMCLR
-        if self.simclr:
-            self.projection_head = nn.Sequential(nn.Linear(self.outdim, self.outdim, bias=False),
-                        nn.ReLU(inplace=True),
-                        nn.Linear(self.outdim, 128, bias=False))
-
         ## Optimizer
-        if self.simclr:
-            from pl_bolts.optimizers import LARS
-            from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
-            from torch.optim.lr_scheduler import LambdaLR
-            self.encoder_opt = LARS(params, lr = (0.3 * bs / 256), weight_decay=1e-6)
-            self.sched = LinearWarmupCosineAnnealingLR(self.encoder_opt, warmup_epochs=10000, max_epochs=1000000)
-        else:
-            self.encoder_opt = torch.optim.Adam(params, lr = lr)
-            self.sched = None
+        self.encoder_opt = torch.optim.Adam(params, lr = lr)
+        self.sched = None
 
 
     def encode(self, image, sentences = None):
         ## Assumes preprocessing and resizing is done
         e = self.convnet(image)
         a = None
-        if self.lang_cond:
-            le = self.lang_enc(sentences)
-            e, a = self.lang_attn(e, le)
-
-        if self.mask:
-            a = self.sigm(self.m.to(e.device).unsqueeze(0).repeat(e.shape[0], 1))
-            e = e * a
-
         return e, a
 
     def get_reward(self, e0, es, sentences):
@@ -143,11 +98,6 @@ class R3M(nn.Module):
 
     ## Forward Call (im --> representation)
     def forward(self, obs, sentences = None, num_ims = 1, obs_shape = [3, 224, 224]):
-        ## If proprioceptive data is stacked at end of obs
-        # if self.proprio_shape > 0:
-        #     proprio = obs[:, -self.proprio_shape:]
-        #     obs = obs[:, :-self.proprio_shape].reshape([obs.shape[0]] + list(obs_shape))
-
         if obs_shape != [3, 224, 224]:
             preprocess = nn.Sequential(
                         transforms.Resize(256),
@@ -159,23 +109,14 @@ class R3M(nn.Module):
                         self.normlayer,
                 )
 
-        ## Input must be [0, 255]
+        ## Input must be [0, 255], [3,244,244]
         obs = obs.float() /  255.0
-        h = []
-        for i in range(0, num_ims*3, 3):
-            obs_p = preprocess(obs[:, i:(i+3)])
-            if self.finetune:
-                e, a = self.encode(obs_p, sentences)
-            else:
-                with torch.no_grad():
-                    e, a = self.encode(obs_p, sentences)
-            h.append(e)
-        h = torch.cat(h, -1)
-        h = h.view(h.shape[0], -1)
-
-        ## Add back proprioception if there
-        # if self.proprio_shape > 0:
-        #     h = torch.cat([h, proprio], -1)
+        obs_p = preprocess(obs)
+        if self.finetune:
+            h, a = self.encode(obs_p, sentences)
+        else:
+            with torch.no_grad():
+                h, a = self.encode(obs_p, sentences)
         return (h, a)
 
     def sim(self, tensor1, tensor2):
