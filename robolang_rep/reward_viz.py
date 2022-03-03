@@ -206,7 +206,7 @@ class GTBuffer(IterableDataset):
             self.aug = lambda a : a
 
         # Load Data
-        self.cams = ["default", "left_cap2", "right_cap2"] #[view] 
+        self.cams = [view]  #["default", "left_cap2", "right_cap2"] #[view] 
         self.tasks = ["kitchen_knob1_on-v3","kitchen_light_on-v3","kitchen_sdoor_open-v3","kitchen_micro_open-v3","kitchen_ldoor_open-v3"] #[task] 
         self.instr = ["Turning the bottom right knob clockwise", "Switching the light on", 
                 "Sliding the top right door open", "Opening the microwave", 
@@ -288,16 +288,16 @@ class Workspace:
             ## Ego4D Val set is WIP
             val_iterable = train_iterable
         elif self.cfg.dataset == "gt":
-            shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
-            # shuf = np.random.choice(200*3, 200*3, replace=False)
+            # shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
+            shuf = np.random.choice(200*5, 200*5, replace=False)
             train_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
                      alpha = self.cfg.alpha, shuf = shuf, gt = 0, view=self.cfg.view, task=self.cfg.task)
             alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
             val_iterable = GTBuffer(self.cfg.replay_buffer_num_workers, "val", "validation",
                      alpha=0, shuf = shuf, gt = 0, alldata=alldata, view=self.cfg.view, task=self.cfg.task)
         elif self.cfg.dataset == "mw":
-            shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
-            # shuf = np.random.choice(200, 200, replace=False)
+            # shuf = np.random.choice(200*5*3, 200*5*3, replace=False)
+            shuf = np.random.choice(200, 200, replace=False)
             train_iterable = MWBuffer(self.cfg.replay_buffer_num_workers, "train", "train",
                      alpha = self.cfg.alpha, shuf = shuf, gt = 0, view=self.cfg.view, task=self.cfg.task)
             alldata = (train_iterable.all_demos, train_iterable.all_labels, train_iterable.all_states)
@@ -443,6 +443,47 @@ class Workspace:
         plt.close()
         assert(False)
 
+    def reward_plot(self, batch_vids, batch_langs):
+        batch_vids_shuf = []
+        neg_lang = []
+        for i in range(batch_vids.shape[0]):
+            ranid = i
+            while batch_langs[ranid] == batch_langs[i]:
+                ranid = np.random.randint(0, batch_vids.shape[0])
+            batch_vids_shuf.append(batch_vids[ranid])
+            neg_lang.append(batch_langs[ranid])
+        batch_vids_shuf = torch.stack(batch_vids_shuf, 0)
+
+        rs = []
+        rns = []
+        for ts in range(0, batch_vids.shape[1]):
+            print(ts)
+            metric = {}
+            with torch.no_grad():
+                r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
+                # r_n1, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf1)
+                # r_n2, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf2)
+                # r_n3, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf3)
+                r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
+            rs.append(r.cpu().detach().numpy())
+            rns.append(r_n4.cpu().detach().numpy())
+        rs = np.stack(rs, -1)
+        rns = np.stack(rns, -1)
+
+        for b in range(batch_vids.shape[0]):
+            filename = self.work_dir.joinpath(f"{b}_demo.gif")
+            from moviepy.editor import ImageSequenceClip
+            clip = ImageSequenceClip(list(batch_vids[b].permute(0, 2, 3, 1).cpu().detach().numpy().astype(np.uint8)), fps=20)
+            clip.write_gif(filename, fps=20)
+
+            import matplotlib.pyplot as plt
+            
+            plt.plot(rs[b], label=f"True Demo: {batch_langs[b]}")
+            plt.plot(rns[b], label=f"Different Demo: {neg_lang[b]}")
+            plt.legend()
+            plt.savefig(self.work_dir.joinpath(f"{b}_rew.png"))
+            plt.close()
+
     def train(self):
         # predicates
         train_until_step = utils.Until(self.cfg.train_steps,
@@ -474,7 +515,10 @@ class Workspace:
         t1 = time.time()
         self.model.eval()
 
-        self.plot_goal_dist(batch_vids[0, -1], batch_vids[1:], self.model, batch_langs)
+        # self.plot_goal_dist(batch_vids[0, -1], batch_vids[1:], self.model, batch_langs)
+        # assert(False)
+
+        self.reward_plot(batch_vids, batch_langs)
         assert(False)
 
         rs= []
@@ -498,44 +542,45 @@ class Workspace:
 
         # assert(False)
 
-        import clip
-        clipmodel, _ = clip.load("RN50", device="cuda")
-        import torchvision.transforms as T
-        cliptransforms = T.Compose([T.Resize(224),
-                                T.CenterCrop(224),
-                                T.ToTensor(), # ToTensor() divides by 255
-                                T.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])])
+        # import clip
+        # clipmodel, _ = clip.load("RN50", device="cuda")
+        # import torchvision.transforms as T
+        # cliptransforms = T.Compose([T.Resize(224),
+        #                         T.CenterCrop(224),
+        #                         T.ToTensor(), # ToTensor() divides by 255
+        #                         T.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])])
 
         for ts in range(0, batch_vids.shape[1]):
             print(ts)
             metric = {}
-            # with torch.no_grad():
-            #     r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
-            #     # r_n1, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf1)
-            #     # r_n2, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf2)
-            #     # r_n3, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf3)
-            #     r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
-
             with torch.no_grad():
-                img = batch_vids[:, -1]
-                imt = batch_vids[:, ts]
-                imn = batch_vids_shuf[:, ts]
-                eg = self.model(img)[0]
-                et = self.model(imt)[0]
-                en = self.model(imn)[0]
-                r = -torch.linalg.norm((eg-et), dim = -1)
-                r_n4 = -torch.linalg.norm((eg-en), dim = -1)
+                r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
+                # r_n1, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf1)
+                # r_n2, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf2)
+                # r_n3, an = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs_shuf3)
+                r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
+            
 
-                clipeg = clipmodel.encode_image(cliptransforms(img))
-                clipet = clipmodel.encode_image(cliptransforms(imt))
-                clipen = clipmodel.encode_image(cliptransforms(imn))
-                print(clipen.shape)
-                print(clipen)
-                clipr = -torch.linalg.norm((clipeg-clipet), dim = -1)
-                clipr_n4 = -torch.linalg.norm((clipeg-clipen), dim = -1)
+            # with torch.no_grad():
+            #     img = batch_vids[:, -1]
+            #     imt = batch_vids[:, ts]
+            #     imn = batch_vids_shuf[:, ts]
+            #     eg = self.model(img)[0]
+            #     et = self.model(imt)[0]
+            #     en = self.model(imn)[0]
+            #     r = -torch.linalg.norm((eg-et), dim = -1)
+            #     r_n4 = -torch.linalg.norm((eg-en), dim = -1)
 
-                pixr = -torch.linalg.norm((img-imt), dim = ((1,2,3)))
-                pixr_n4 = -torch.linalg.norm((imt-imn), dim = ((1,2,3)))
+            #     clipeg = clipmodel.encode_image(cliptransforms(img))
+            #     clipet = clipmodel.encode_image(cliptransforms(imt))
+            #     clipen = clipmodel.encode_image(cliptransforms(imn))
+            #     print(clipen.shape)
+            #     print(clipen)
+            #     clipr = -torch.linalg.norm((clipeg-clipet), dim = -1)
+            #     clipr_n4 = -torch.linalg.norm((clipeg-clipen), dim = -1)
+
+            #     pixr = -torch.linalg.norm((img-imt), dim = ((1,2,3)))
+            #     pixr_n4 = -torch.linalg.norm((imt-imn), dim = ((1,2,3)))
                 # r, a = self.model.module.get_reward(self.model(batch_vids[:, 0])[0], self.model(batch_vids[:, ts])[0], batch_langs)
                 # r_n4, an = self.model.module.get_reward(self.model(batch_vids_shuf[:, 0])[0], self.model(batch_vids_shuf[:, ts])[0], batch_langs)
 
