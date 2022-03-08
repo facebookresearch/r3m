@@ -12,9 +12,14 @@ You can test if it has installed correctly by running `import robolang_rep` from
 
 ## Using the representation
 
-Example code to use a pre-trained representation is located in the example [here](https://github.com/fairinternal/robolang_rep/blob/clean/robolang_rep/example.py)
+To use the model in your code simply run:
+```
+from robolang_rep import load_r3m
+r3m = load_r3m("resnet50") # resnet18, resnet34
+r3m.eval()
+```
 
-The model to use is located at `/checkpoint/surajn/drqoutput/train_representation/2022-01-24_11-10-28/10_agent.finetunelang=0,agent.l1weight=1e-05,agent.langtype=lorel,agent.langweight=1.0,agent.size=50,batch_size=16,dataset=ego4d,doaug=rctraj,experiment=rep_0124/snapshot_1000000.pt`
+Further example code to use a pre-trained representation is located in the example [here](https://github.com/fairinternal/robolang_rep/blob/clean/robolang_rep/example.py)
 
 ## Training the representation
 
