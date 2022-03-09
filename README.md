@@ -4,7 +4,7 @@ This project studies how to learn generalizable visual representation for roboti
 
 ## Installation
 
-First you can install a conda env from the environment.yml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/robolang_rep/environment.yml).
+First you can install a conda env from the environment.yml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/environment.yaml).
 
 Then install from this directory with `pip install -e .`
 
@@ -14,12 +14,12 @@ You can test if it has installed correctly by running `import r3m` from a python
 
 To use the model in your code simply run:
 ```
-from robolang_rep import load_r3m
+from r3m import load_r3m
 r3m = load_r3m("resnet50") # resnet18, resnet34
 r3m.eval()
 ```
 
-Further example code to use a pre-trained representation is located in the example [here](https://github.com/fairinternal/robolang_rep/blob/clean/robolang_rep/example.py)
+Further example code to use a pre-trained representation is located in the example [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/example.py)
 
 ## Training the representation
 
