@@ -10,10 +10,10 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(
-    name='robolang_rep',
+    name='r3m',
     version='0.0.0',
     packages=find_packages(),
-    description='Pretrained Representations for Manipulation',
+    description='Pretrained Rusable Representations for Robot Manipulation',
     long_description=read('README.md'),
     author='Suraj Nair (FAIR)',
 )

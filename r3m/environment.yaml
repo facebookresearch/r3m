@@ -29,12 +29,17 @@ dependencies:
   - zlib=1.2.11=h36c2ea0_1013
   - pip:
     - antlr4-python3-runtime==4.8
+    - beautifulsoup4==4.10.0
     - certifi==2021.10.8
     - charset-normalizer==2.0.12
     - click==8.0.4
     - cycler==0.11.0
+    - docker-pycreds==0.4.0
     - filelock==3.6.0
     - fonttools==4.29.1
+    - gdown==4.4.0
+    - gitdb==4.0.9
+    - gitpython==3.1.27
     - huggingface-hub==0.4.0
     - hydra-core==1.1.1
     - idna==3.3
@@ -44,14 +49,27 @@ dependencies:
     - numpy==1.22.2
     - omegaconf==2.1.1
     - packaging==21.3
+    - pandas==1.4.1
+    - pathtools==0.1.2
     - pillow==9.0.1
+    - promise==2.3
+    - protobuf==3.19.4
+    - psutil==5.9.0
     - pyparsing==3.0.7
+    - pysocks==1.7.1
     - python-dateutil==2.8.2
+    - pytz==2021.3
     - pyyaml==6.0
     - regex==2022.1.18
     - requests==2.27.1
     - sacremoses==0.0.47
+    - sentry-sdk==1.5.7
+    - setproctitle==1.2.2
+    - shortuuid==1.0.8
     - six==1.16.0
+    - smmap==5.0.0
+    - soupsieve==2.3.1
+    - termcolor==1.1.0
     - tokenizers==0.11.5
     - torch==1.7.1
     - torchvision==0.8.2
@@ -59,4 +77,6 @@ dependencies:
     - transformers==4.16.2
     - typing-extensions==4.1.1
     - urllib3==1.26.8
+    - wandb==0.12.11
+    - yaspin==2.1.0
 prefix: /private/home/surajn/.conda/envs/r3m_test

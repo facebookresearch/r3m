@@ -41,7 +41,7 @@ class Trainer():
         ## Encode Start and End Frames
         bs = b_im.shape[0]
         b_im_r = b_im.reshape(bs*5, 3, 224, 224)
-        alles, att = model(b_im_r, context)
+        alles = model(b_im_r, context)
         alle = alles.reshape(bs, 5, -1)
         e0 = alle[:, 0]
         eg = alle[:, 1]
@@ -66,8 +66,8 @@ class Trainer():
         t3 = time.time()
         ## Language Predictive Loss
         if model.module.langweight > 0:
+            ## Number of negative examples to use for language
             num_neg = 3
-            # b_lang_shuf = copy.deepcopy(b_lang)
             sim_pos1, _ = model.module.get_reward(e0, eg, b_lang)
             sim_pos2, _ = model.module.get_reward(e0, es1, b_lang)
             sim_pos3, _ = model.module.get_reward(e0, es2, b_lang)
@@ -78,10 +78,6 @@ class Trainer():
             sim_negs2.append(model.module.get_reward(e0, es0, b_lang)[0])
             sim_negs3.append(model.module.get_reward(e0, es1, b_lang)[0])
             for _ in range(num_neg):
-                # random.shuffle(b_lang_shuf)
-                # sim_negs1.append(model.module.get_reward(e0, eg, b_lang_shuf)[0])
-                # sim_negs2.append(model.module.get_reward(e0, es1, b_lang_shuf)[0])
-                # sim_negs3.append(model.module.get_reward(e0, es2, b_lang_shuf)[0])
                 negvidid = torch.randperm(e0.size()[0])
                 sim_negs1.append(model.module.get_reward(e0[negvidid], eg[negvidid], b_lang)[0])
                 negvidid = torch.randperm(e0.size()[0])
@@ -111,17 +107,14 @@ class Trainer():
             metrics['rewacc1'] = lacc1.item()
             metrics['rewacc2'] = lacc2.item()
             metrics['rewacc3'] = lacc3.item()
-
-            alllangstuff = torch.cat([sim_pos1, sim_negs1[:, 0], sim_negs1[:, 1], sim_negs1[:, 2]], -1)
-
             full_loss += model.module.langweight * rewloss
-            langstuff = (e0, eg, alllangstuff)
 
         t4 = time.time()
 
         t5 = time.time()
         ## Within Video TCN Loss
         if model.module.tcnweight > 0:
+            ## Number of negative video examples to use
             num_neg_v = 3
             sim_0_2 = model.module.sim(es2, es0) 
             sim_1_2 = model.module.sim(es2, es1)
@@ -144,7 +137,6 @@ class Trainer():
             metrics['tcnloss'] = smoothloss.item()
             metrics['aligned'] = a_state.item()
             full_loss += model.module.tcnweight * smoothloss
-            smoothstuff = (es0, es1, es2, att)
 
         metrics['full_loss'] = full_loss.item()
         
@@ -154,78 +146,6 @@ class Trainer():
             full_loss.backward()
             model.module.encoder_opt.step()
 
-        if (step % self.eval_freq == 0):
-            self.log_batch(b_im[:, 0], b_im[:, 1], b_im[:, 2], b_im[:, 3], b_im[:, 4], step, b_lang, eval, langstuff, smoothstuff)
         t7 = time.time()
-        st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, Contrastive time {t5-t4}, TCN time {t6-t5}, Backprop time {t7-t6}"
+        st = f"Load time {t1-t0}, Batch time {t2-t1}, Encode and LP tine {t3-t2}, Lang time {t4-t3}, TCN time {t6-t5}, Backprop time {t7-t6}"
         return metrics, st
-
-    ## Logging initial and final images and their language
-    def log_data(self, b_im0, b_img, step, lang, eval):
-        im_logging = []
-        for i in range(8):
-            im = torch.cat([b_im0[i], b_img[i]], 1)
-            im_logging.append(im)
-        ims_log = torch.cat(im_logging, -1) / 255.0
-        self.work_dir = Path.cwd().joinpath('ims').joinpath(f'{eval}_{step}')
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        save_image(ims_log, self.work_dir.joinpath(f"im.png"))
-        with open(self.work_dir.joinpath(f"lang.txt"), 'w') as f:
-            for item in lang[:8]:
-                f.write("%s\n" % item)
-
-    ## Logging images used for TCN Loss
-    def log_smooth_data(self, b_ims0, b_ims1, b_ims2, step, lang, eval):
-        im_logging = []
-        for i in range(8):
-            im = torch.cat([b_ims0[i], b_ims1[i], b_ims2[i]], 1)
-            im_logging.append(im)
-        ims_log = torch.cat(im_logging, -1) / 255.0
-        self.work_dir = Path.cwd().joinpath('ims').joinpath(f'{eval}_{step}')
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        save_image(ims_log, self.work_dir.joinpath(f"smoothim.png"))
-
-    ## Logging language predictions
-    def log_lang(self, tensors, step, eval):
-        e0, eg, preds = tensors
-        with open(self.work_dir.joinpath(f"preds.txt"), 'w') as f:
-            for item in preds.squeeze():
-                f.write("%s\n" % item)
-
-    ### Plotting TCN triplets in embedding space and attention mask
-    def log_smooth(self, tensors, step, eval):
-        e0, e1, e2, attn = tensors
-        bs = 10
-        al = torch.cat([e0, e1, e2], 0)
-        save_image(F.sigmoid(al / al.max(-1)[0].unsqueeze(-1)), self.work_dir.joinpath(f"embeddings.png"))
-        u, s, v = torch.pca_lowrank(al, q=2, niter=100)
-        u = u.cpu().detach().numpy()
-        u_0 = u[0:bs]
-        u_1 = u[bs:(2*bs)]
-        u_2 = u[(2*bs):(3*bs)]
-        for j in range(bs):
-            plt.plot([u_0[j, 0], u_1[j, 0]], [u_0[j, 1], u_1[j, 1]], color="green", marker=".")
-            plt.plot([u_1[j, 0], u_2[j, 0]], [u_1[j, 1], u_2[j, 1]], color="red", marker=".")
-        plt.savefig(self.work_dir.joinpath(f"pca_smooth.png"))
-        plt.close()
-
-        if attn is not None:
-            if len(attn.shape) == 2:
-                save_image(attn, self.work_dir.joinpath(f"attn_smooth.png"))
-            else:
-                for j in range(bs):
-                    save_image(attn[j].unsqueeze(0), self.work_dir.joinpath(f"attn_{j}_smooth.png"))
-
-    def log_batch(self, b_im0, b_img, b_ims0, b_ims1, b_ims2, step, lang, eval, tensors=None, smoothtensors=None):
-        ## Visualize Training Data
-        self.log_data(b_im0, b_img, step, lang, eval)
-        
-        ## Visualize Language Data
-        if tensors is not None:
-            self.log_lang(tensors, step, eval)
-
-        ## Visualize Smoothness Data
-        if smoothtensors is not None:
-            self.log_smooth(smoothtensors, step, eval)
-            self.log_smooth_data(b_ims0, b_ims1, b_ims2, step, lang, eval)
-

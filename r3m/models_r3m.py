@@ -11,21 +11,19 @@ from torch.nn.modules.linear import Identity
 import torchvision
 from torchvision import transforms
 from transformers import AutoTokenizer, AutoModel, AutoConfig
-from robolang_rep import utils
+from r3m import utils
 from pathlib import Path
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import torchvision.transforms as T
-from robolang_rep.models_language import LangEncoder, LanguageReward
+from r3m.models_language import LangEncoder, LanguageReward
 
 epsilon = 1e-8
 def do_nothing(x): return x
 
 class R3M(nn.Module):
-    def __init__(self, device, lr, hidden_dim, finetune=1, pretrained=0, size=34, l2weight=1.0, l1weight=1.0, 
-                 langweight=1.0, tcnweight=0.0, structured=False, lang_cond=False, 
-                 l2dist=True, attntype="modulate", finetunelang=0, simclr=False, bs=16,
-                 num_same=1, langtype="reconstruct", anneall1=False, mask=True):
+    def __init__(self, device, lr, hidden_dim, size=34, l2weight=1.0, l1weight=1.0, 
+                 langweight=1.0, tcnweight=0.0, l2dist=True, bs=16):
         super().__init__()
 
         self.device = device
@@ -36,7 +34,6 @@ class R3M(nn.Module):
         self.l2dist = l2dist ## Use -l2 or cosine sim
         self.langweight = langweight ## Weight on language reward
         self.size = size ## Size ResNet or ViT
-        self.finetune = finetune ## Train Model
 
         ## Distances and Metrics
         self.cs = torch.nn.CosineSimilarity(1)
@@ -51,28 +48,23 @@ class R3M(nn.Module):
         ## Visual Encoder
         if size == 18:
             self.outdim = 512
-            self.convnet = torchvision.models.resnet18(pretrained=pretrained)
+            self.convnet = torchvision.models.resnet18(pretrained=False)
         elif size == 34:
             self.outdim = 512
-            self.convnet = torchvision.models.resnet34(pretrained=pretrained)
+            self.convnet = torchvision.models.resnet34(pretrained=False)
         elif size == 50:
             self.outdim = 2048
-            self.convnet = torchvision.models.resnet50(pretrained=pretrained)
+            self.convnet = torchvision.models.resnet50(pretrained=False)
         elif size == 0:
             self.outdim = 768
-            if pretrained:
-                self.convnet = AutoModel.from_pretrained('google/vit-base-patch32-224-in21k').to('cuda')
-            else:
-                self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to('cuda')
+            self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to('cuda')
+
         if self.size == 0:
             self.normlayer = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         else:
             self.normlayer = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.convnet.fc = Identity()
-        if self.finetune:
-            self.convnet.train()
-        else:
-            self.convnet.eval()
+        self.convnet.train()
         params += list(self.convnet.parameters())
         
         ## Language Reward
@@ -83,14 +75,11 @@ class R3M(nn.Module):
 
         ## Optimizer
         self.encoder_opt = torch.optim.Adam(params, lr = lr)
-        self.sched = None
 
 
     def encode(self, image, sentences = None):
         ## Assumes preprocessing and resizing is done
-        e = self.convnet(image)
-        a = None
-        return e, a
+        return self.convnet(image)
 
     def get_reward(self, e0, es, sentences):
         le = self.lang_enc(sentences)
@@ -112,12 +101,8 @@ class R3M(nn.Module):
         ## Input must be [0, 255], [3,244,244]
         obs = obs.float() /  255.0
         obs_p = preprocess(obs)
-        if self.finetune:
-            h, a = self.encode(obs_p, sentences)
-        else:
-            with torch.no_grad():
-                h, a = self.encode(obs_p, sentences)
-        return (h, a)
+        h = self.encode(obs_p, sentences)
+        return h
 
     def sim(self, tensor1, tensor2):
         if self.l2dist:

@@ -34,25 +34,14 @@ doaug: "none"
 
 
 agent:
-  _target_: robolang_rep.R3M
+  _target_: r3m.R3M
   device: ${device}
   lr: ${lr}
   hidden_dim: 1024
-  finetune: 1
-  pretrained: 0
   size: 34
   l2weight: 0.00001
   l1weight: 0.00001
-  anneall1: false
   tcnweight: 1.0
   langweight: 0.0
-  structured: true
-  lang_cond: false
   l2dist: true
-  attntype: modulate
-  finetunelang: false
-  num_same: ${num_same}
-  langtype: reconstruct
-  mask: false
-  simclr: ${simclr}
   bs: ${batch_size}

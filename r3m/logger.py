@@ -11,7 +11,7 @@ import torch
 import torchvision
 from termcolor import colored
 import wandb
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 COMMON_TRAIN_FORMAT = [('frame', 'F', 'int'), ('step', 'S', 'int'),
                        ('episode', 'E', 'int'), ('episode_length', 'L', 'int'),

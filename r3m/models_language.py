@@ -32,7 +32,6 @@ class LangEncoder(nn.Module):
       attention_mask = encoded_input['attention_mask'].to(self.device)
       lang_embedding = self.model(input_ids, attention_mask=attention_mask).last_hidden_state
       lang_embedding = lang_embedding.mean(1)
-      # lang_embedding = lang_embedding[:, -1]
     return lang_embedding
 
 class LanguageReward(nn.Module):

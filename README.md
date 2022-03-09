@@ -8,7 +8,7 @@ First you can install a conda env from the environment.yml file [here](https://g
 
 Then install from this directory with `pip install -e .`
 
-You can test if it has installed correctly by running `import robolang_rep` from a python shell.
+You can test if it has installed correctly by running `import r3m` from a python shell.
 
 ## Using the representation
 

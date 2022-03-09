@@ -19,9 +19,9 @@ import torch
 from torchvision import transforms
 from torch.utils.data import IterableDataset
 import pandas as pd
-from robolang_rep import utils
-from robolang_rep.trainer import Trainer
-from robolang_rep.data_loaders import R3MBuffer
+from r3m import utils
+from r3m.trainer import Trainer
+from r3m.data_loaders import R3MBuffer
 from logger import Logger
 import json
 import time
@@ -29,7 +29,6 @@ import pickle
 from torchvision.utils import save_image
 import json
 import random
-import av
 
 torch.backends.cudnn.benchmark = True
 
@@ -51,16 +50,10 @@ class Workspace:
         self.setup()
 
         print("Creating Dataloader")
-        if self.cfg.dataset == "robonet":
-            sources = ["robonet"]
-        elif self.cfg.dataset == "ego4d":
+        if self.cfg.dataset == "ego4d":
             sources = ["ego4d"]
-        elif self.cfg.dataset == "sthsth":
-            sources = ["sthsth"]
-        elif self.cfg.dataset == "allhuman":
-            sources = ["sthsth", "ego4d"]
-        elif self.cfg.dataset == "all":
-            sources = ["sthsth", "robonet", "ego4d"]
+        else:
+            raise NameError('Invalid Dataset')
 
         train_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "train", "train", 
                                     alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = 0)
@@ -83,7 +76,6 @@ class Workspace:
 
         self.timer = utils.Timer()
         self._global_step = 0
-        self._global_episode = 0
 
         ## If reloading existing model
         if cfg.load_snap:
@@ -99,18 +91,8 @@ class Workspace:
         return self._global_step
 
     @property
-    def global_episode(self):
-        return self._global_episode
-
-    @property
     def global_frame(self):
         return self.global_step
-
-    @property
-    def replay_iter(self):
-        if self._replay_iter is None:
-            self._replay_iter = iter(self.replay_loader)
-        return self._replay_iter
 
     def train(self):
         # predicates
@@ -170,16 +152,7 @@ def main(cfg):
     root_dir = Path.cwd()
     workspace = W(cfg)
 
-    restore_dir = ""
-    # restore_dir = "/checkpoint/surajn/drqoutput/train_representation/2022-02-02_23-00-44"
-    if restore_dir != "":
-        last = str(root_dir.resolve()).split("/")[-1]
-        snapshot = Path(f"{restore_dir}/{last}/snapshot.pt")
-        print(snapshot)
-        print("***")
-        # assert(snapshot.exists())
-    else:
-        snapshot = root_dir / 'snapshot.pt'
+    snapshot = root_dir / 'snapshot.pt'
     if snapshot.exists():
         print(f'resuming: {snapshot}')
         workspace.load_snapshot(snapshot)

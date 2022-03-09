@@ -5,7 +5,7 @@ api = wandb.Api()
 entity, project = "surajnfb", "bc"  # set to your entity and project 
 runs = api.runs(entity + "/" + project) 
 
-names = ["BC_0210", "BC_0223"]
+names = ["BC_0303","BC_0210", "BC_0223"]
 summary_list, config_list, name_list = [], [], []
 i = 0
 everythingdict = {
@@ -70,30 +70,10 @@ for run in runs:
     except:
         pass
 
-    # summary_list.append(run.summary._json_dict)
-    # # print(run.summary._json_dict)
-    # for key in run.summary._json_dict:
-    #     print(key)
-
-    # # .config contains the hyperparameters.
-    # #  We remove special values that start with _.
-    # config_list.append(
-    #     {k: v for k,v in run.config.items()
-    #      if not k.startswith('_')})
-    # for key in run.config:
-    #     print(key)
-    # # print(config_list)
-
-    # # .name is the human-readable name of the run.
-    # name_list.append(run.name)
-    # # print(run.name)
-    # # assert(False)
     print(i)
-    # assert(False)
     i += 1
 
 runs_df = pd.DataFrame(everythingdict)
 dfc = runs_df.groupby(['load_path', "finetune", "env"]).count().reset_index()
 print(dfc)
-
-runs_df.to_csv("2seeds.csv")
+runs_df.to_csv("3seeds.csv")

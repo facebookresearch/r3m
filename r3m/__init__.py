@@ -1,4 +1,4 @@
-from robolang_rep.models_r3m import R3M
+from r3m.models_r3m import R3M
 
 import os 
 from os.path import expanduser
@@ -6,6 +6,18 @@ import omegaconf
 import hydra
 import gdown
 import torch
+import copy
+
+VALID_ARGS = ["_target_", "device", "lr", "hidden_dim", "size", "l2weight", "l1weight", "langweight", "tcnweight", "l2dist", "bs"]
+
+def cleanup_config(cfg):
+    config = copy.deepcopy(cfg)
+    keys = config.agent.keys()
+    for key in list(keys):
+        if key not in VALID_ARGS:
+            del config.agent[key]
+    config.agent["_target_"] = "r3m.R3M"
+    return config.agent
 
 def load_r3m(modelid):
     home = os.path.join(expanduser("~"), ".r3m")
@@ -31,9 +43,10 @@ def load_r3m(modelid):
     if not os.path.exists(modelpath):
         gdown.download(modelurl, modelpath, quiet=False)
         gdown.download(configurl, configpath, quiet=False)
-
+        
     modelcfg = omegaconf.OmegaConf.load(configpath)
-    rep = hydra.utils.instantiate(modelcfg.agent)
+    cleancfg = cleanup_config(modelcfg)
+    rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
     rep.load_state_dict(torch.load(modelpath)['r3m'])
     return rep
@@ -68,7 +81,8 @@ def load_r3m_reproduce(modelid):
         gdown.download(configurl, configpath, quiet=False)
 
     modelcfg = omegaconf.OmegaConf.load(configpath)
-    rep = hydra.utils.instantiate(modelcfg.agent)
+    cleancfg = cleanup_config(modelcfg)
+    rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
     rep.load_state_dict(torch.load(modelpath)['r3m'])
     return rep
