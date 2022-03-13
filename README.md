@@ -1,4 +1,4 @@
-# Visual Representation Learning for Robotic Manipulation
+# R3M: Pre-Training Reusable Representations for Robotic Manipulation using Diverse Human Videos
 
 This project studies how to learn generalizable visual representation for robotics from videos of humans and natural language.
 
