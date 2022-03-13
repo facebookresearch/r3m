@@ -19,9 +19,9 @@ import torch
 from torchvision import transforms
 from torch.utils.data import IterableDataset
 import pandas as pd
-from robolang_rep import utils
-from robolang_rep.trainer import Trainer
-from robolang_rep.data_loaders import R3MBuffer, RoboNetBuffer, Ego4DBuffer, GTBuffer, VideoBuffer
+from r3m import utils
+from r3m.trainer import Trainer
+from r3m.data_loaders import R3MBuffer
 from logger import Logger
 import json
 import time
@@ -29,7 +29,6 @@ import pickle
 from torchvision.utils import save_image
 import json
 import random
-import av
 
 torch.backends.cudnn.benchmark = True
 
@@ -51,21 +50,15 @@ class Workspace:
         self.setup()
 
         print("Creating Dataloader")
-        if self.cfg.dataset == "robonet":
-            sources = ["robonet"]
-        elif self.cfg.dataset == "ego4d":
+        if self.cfg.dataset == "ego4d":
             sources = ["ego4d"]
-        elif self.cfg.dataset == "sthsth":
-            sources = ["sthsth"]
-        elif self.cfg.dataset == "allhuman":
-            sources = ["sthsth", "ego4d"]
-        elif self.cfg.dataset == "all":
-            sources = ["sthsth", "robonet", "ego4d"]
+        else:
+            raise NameError('Invalid Dataset')
 
         train_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "train", "train", 
-                                    alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = self.cfg.simclr)
+                                    alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = 0)
         val_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", 
-                                    alpha = 0, datasources=sources, doaug = 0, simclr = self.cfg.simclr)
+                                    alpha = 0, datasources=sources, doaug = 0, simclr = 0)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
@@ -83,7 +76,6 @@ class Workspace:
 
         self.timer = utils.Timer()
         self._global_step = 0
-        self._global_episode = 0
 
         ## If reloading existing model
         if cfg.load_snap:
@@ -99,18 +91,8 @@ class Workspace:
         return self._global_step
 
     @property
-    def global_episode(self):
-        return self._global_episode
-
-    @property
     def global_frame(self):
         return self.global_step
-
-    @property
-    def replay_iter(self):
-        if self._replay_iter is None:
-            self._replay_iter = iter(self.replay_loader)
-        return self._replay_iter
 
     def train(self):
         # predicates
@@ -126,16 +108,9 @@ class Workspace:
         while train_until_step(self.global_step):
             ## Sample Batch
             t0 = time.time()
-            
-            if self.cfg.simclr:
-                bf1, bf2 = next(self.train_loader)
-                t1 = time.time()
-                batch = (bf1.cuda(), bf2.cuda())
-                metrics, st = trainer.update_simclr(self.model, batch, self.global_step)
-            else:
-                batch_f, batch_langs = next(self.train_loader)
-                t1 = time.time()
-                metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step)
+            batch_f, batch_langs = next(self.train_loader)
+            t1 = time.time()
+            metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step)
             t2 = time.time()
             self.logger.log_metrics(metrics, self.global_frame, ty='train')
 
@@ -146,14 +121,8 @@ class Workspace:
                 
             if eval_every_step(self.global_step):
                 with torch.no_grad():
-                    
-                    if self.cfg.simclr:
-                        bf1, bf2 = next(self.val_loader)
-                        batch = (bf1.cuda(), bf2.cuda())
-                        metrics, st = trainer.update_simclr(self.model, batch, self.global_step, eval=True)
-                    else:
-                        batch_f, batch_langs = next(self.val_loader)
-                        metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)
+                    batch_f, batch_langs = next(self.val_loader)
+                    metrics, st = trainer.update(self.model, (batch_f.cuda(), batch_langs), self.global_step, eval=True)
                     self.logger.log_metrics(metrics, self.global_frame, ty='eval')
                     print("EVAL", self.global_step, metrics)
 
@@ -183,16 +152,7 @@ def main(cfg):
     root_dir = Path.cwd()
     workspace = W(cfg)
 
-    restore_dir = ""
-    # restore_dir = "/checkpoint/surajn/drqoutput/train_representation/2022-02-02_23-00-44"
-    if restore_dir != "":
-        last = str(root_dir.resolve()).split("/")[-1]
-        snapshot = Path(f"{restore_dir}/{last}/snapshot.pt")
-        print(snapshot)
-        print("***")
-        # assert(snapshot.exists())
-    else:
-        snapshot = root_dir / 'snapshot.pt'
+    snapshot = root_dir / 'snapshot.pt'
     if snapshot.exists():
         print(f'resuming: {snapshot}')
         workspace.load_snapshot(snapshot)
