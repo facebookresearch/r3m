@@ -4,9 +4,9 @@ This project studies how to learn generalizable visual representation for roboti
 
 ## Installation
 
-First you can install a conda env from the r3m_base.yaml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/r3m_base.yaml).
+To install R3M from an existing conda environment, simply run `pip install -e .` from this directory. 
 
-Then install from this directory with `pip install -e .`
+You can alternatively build a fresh conda env from the r3m_base.yaml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/r3m_base.yaml) and then install from this directory with `pip install -e .`
 
 You can test if it has installed correctly by running `import r3m` from a python shell.
 
