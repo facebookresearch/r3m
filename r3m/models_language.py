@@ -7,13 +7,13 @@ from numpy.core.numeric import full
 import torch
 import torch.nn as nn
 from torch.nn.modules.activation import Sigmoid
-from transformers import AutoTokenizer, AutoModel, AutoConfig
 
 epsilon = 1e-8
 
 class LangEncoder(nn.Module):
   def __init__(self, finetune = False, scratch=False):
     super().__init__()
+    from transformers import AutoTokenizer, AutoModel, AutoConfig
     self.device = "cuda"
     self.modelname = "distilbert-base-uncased"
     self.tokenizer = AutoTokenizer.from_pretrained(self.modelname)

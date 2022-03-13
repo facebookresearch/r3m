@@ -10,13 +10,10 @@ from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.linear import Identity
 import torchvision
 from torchvision import transforms
-from transformers import AutoTokenizer, AutoModel, AutoConfig
 from r3m import utils
 from pathlib import Path
 from torchvision.utils import save_image
-import matplotlib.pyplot as plt
 import torchvision.transforms as T
-from r3m.models_language import LangEncoder, LanguageReward
 
 epsilon = 1e-8
 def do_nothing(x): return x
@@ -42,9 +39,6 @@ class R3M(nn.Module):
 
         params = []
         ######################################################################## Sub Modules
-        ## Pretrained DistilBERT Sentence Encoder
-        self.lang_enc = LangEncoder(0, 0) 
-
         ## Visual Encoder
         if size == 18:
             self.outdim = 512
@@ -56,6 +50,7 @@ class R3M(nn.Module):
             self.outdim = 2048
             self.convnet = torchvision.models.resnet50(pretrained=False)
         elif size == 0:
+            from transformers import AutoConfig
             self.outdim = 768
             self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to('cuda')
 
@@ -69,6 +64,9 @@ class R3M(nn.Module):
         
         ## Language Reward
         if self.langweight > 0.0:
+            ## Pretrained DistilBERT Sentence Encoder
+            from r3m.models_language import LangEncoder, LanguageReward
+            self.lang_enc = LangEncoder(0, 0) 
             self.lang_rew = LanguageReward(None, self.outdim, hidden_dim, self.lang_enc.lang_size, simfunc=self.sim) 
             params += list(self.lang_rew.parameters())
         ########################################################################
@@ -82,6 +80,7 @@ class R3M(nn.Module):
         return self.convnet(image)
 
     def get_reward(self, e0, es, sentences):
+        ## Only callable is langweight was set to be 1
         le = self.lang_enc(sentences)
         return self.lang_rew(e0, es, le)
 

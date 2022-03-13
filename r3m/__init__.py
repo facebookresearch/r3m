@@ -17,7 +17,19 @@ def cleanup_config(cfg):
         if key not in VALID_ARGS:
             del config.agent[key]
     config.agent["_target_"] = "r3m.R3M"
+    
+    ## Hardcodes to remove the language head
+    ## Assumes downstream use is as visual representation
+    config.agent["langweight"] = 0
     return config.agent
+
+def remove_language_head(state_dict):
+    # sd = copy.deepcopy(state_dict)
+    keys = state_dict.keys()
+    for key in list(keys):
+        if ("lang_enc" in key) or ("lang_rew" in key):
+            del state_dict[key]
+    return state_dict
 
 def load_r3m(modelid):
     home = os.path.join(expanduser("~"), ".r3m")
@@ -48,7 +60,8 @@ def load_r3m(modelid):
     cleancfg = cleanup_config(modelcfg)
     rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
-    rep.load_state_dict(torch.load(modelpath)['r3m'])
+    r3m_state_dict = remove_language_head(torch.load(modelpath)['r3m'])
+    rep.load_state_dict(r3m_state_dict)
     return rep
 
 def load_r3m_reproduce(modelid):
@@ -84,6 +97,7 @@ def load_r3m_reproduce(modelid):
     cleancfg = cleanup_config(modelcfg)
     rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
-    rep.load_state_dict(torch.load(modelpath)['r3m'])
+    r3m_state_dict = remove_language_head(torch.load(modelpath)['r3m'])
+    rep.load_state_dict(r3m_state_dict)
     return rep
     
