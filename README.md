@@ -4,7 +4,7 @@ This project studies how to learn generalizable visual representation for roboti
 
 ## Installation
 
-First you can install a conda env from the environment.yml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/environment.yaml).
+First you can install a conda env from the environment.yml file [here](https://github.com/fairinternal/robolang_rep/blob/clean/r3m/r3m_base.yaml).
 
 Then install from this directory with `pip install -e .`
 
