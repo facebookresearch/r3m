@@ -25,7 +25,7 @@ Further example code to use a pre-trained representation is located in the examp
 
 To train the representation run:
 
-`python train_representation.py hydra/launcher=local hydra/output=local agent.langweight=1.0 agent.size=50 experiment=r3m_test dataset=ego4d doaug=rctraj agent.l1weight=0.00001 batch_size=16 datapath=<PATH TO PARSED Ego4D DATA>`
+`python train_representation.py hydra/launcher=local hydra/output=local agent.langweight=1.0 agent.size=50 experiment=r3m_test dataset=ego4d doaug=rctraj agent.l1weight=0.00001 batch_size=16 datapath=<PATH TO PARSED Ego4D DATA> wandbuser=<WEIGHTS AND BIASES USER> wandbproject=<WEIGHTS AND BIASES PROJECT>`
  
 Note: For fast training, the Ego4D data loading code assumes that the dataset has been parsed into frames, with a folder for each video clip and frames of the videoclip (resized to [224 x 224]) numbered within the directory (for example `000123.jpg`). It also assumes a file called `manifest.csv` which has a row for each clip, with the path to the clip folder, the clip length, and the natural language pairing for the clip. 
 
