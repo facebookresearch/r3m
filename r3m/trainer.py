@@ -13,7 +13,6 @@ from pathlib import Path
 from torchvision.utils import save_image
 import time
 import copy
-import matplotlib.pyplot as plt
 import torchvision.transforms as T
 
 epsilon = 1e-8

@@ -9,7 +9,6 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torchvision
-from termcolor import colored
 import wandb
 
 COMMON_TRAIN_FORMAT = [('frame', 'F', 'int'), ('step', 'S', 'int'),
