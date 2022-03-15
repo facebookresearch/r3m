@@ -11,13 +11,13 @@ from torch.nn.modules.activation import Sigmoid
 epsilon = 1e-8
 
 class LangEncoder(nn.Module):
-  def __init__(self, finetune = False, scratch=False):
+  def __init__(self, device, finetune = False, scratch=False):
     super().__init__()
     from transformers import AutoTokenizer, AutoModel, AutoConfig
-    self.device = "cuda"
+    self.device = device
     self.modelname = "distilbert-base-uncased"
     self.tokenizer = AutoTokenizer.from_pretrained(self.modelname)
-    self.model = AutoModel.from_pretrained(self.modelname).to('cuda')
+    self.model = AutoModel.from_pretrained(self.modelname).to(self.device)
     self.lang_size = 768
       
   def forward(self, langs):

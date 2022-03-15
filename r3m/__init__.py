@@ -1,3 +1,7 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 from r3m.models_r3m import R3M
 
 import os 
@@ -9,6 +13,10 @@ import torch
 import copy
 
 VALID_ARGS = ["_target_", "device", "lr", "hidden_dim", "size", "l2weight", "l1weight", "langweight", "tcnweight", "l2dist", "bs"]
+if torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
 
 def cleanup_config(cfg):
     config = copy.deepcopy(cfg)
@@ -17,6 +25,7 @@ def cleanup_config(cfg):
         if key not in VALID_ARGS:
             del config.agent[key]
     config.agent["_target_"] = "r3m.R3M"
+    config["device"] = device
     
     ## Hardcodes to remove the language head
     ## Assumes downstream use is as visual representation
@@ -24,8 +33,9 @@ def cleanup_config(cfg):
     return config.agent
 
 def remove_language_head(state_dict):
-    # sd = copy.deepcopy(state_dict)
     keys = state_dict.keys()
+    ## Hardcodes to remove the language head
+    ## Assumes downstream use is as visual representation
     for key in list(keys):
         if ("lang_enc" in key) or ("lang_rew" in key):
             del state_dict[key]
@@ -60,7 +70,7 @@ def load_r3m(modelid):
     cleancfg = cleanup_config(modelcfg)
     rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
-    r3m_state_dict = remove_language_head(torch.load(modelpath)['r3m'])
+    r3m_state_dict = remove_language_head(torch.load(modelpath, map_location=torch.device(device))['r3m'])
     rep.load_state_dict(r3m_state_dict)
     return rep
 
@@ -97,7 +107,8 @@ def load_r3m_reproduce(modelid):
     cleancfg = cleanup_config(modelcfg)
     rep = hydra.utils.instantiate(cleancfg)
     rep = torch.nn.DataParallel(rep)
-    r3m_state_dict = remove_language_head(torch.load(modelpath)['r3m'])
+    r3m_state_dict = remove_language_head(torch.load(modelpath, map_location=torch.device(device))['r3m'])
+
     rep.load_state_dict(r3m_state_dict)
     return rep
     

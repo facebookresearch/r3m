@@ -52,7 +52,7 @@ class R3M(nn.Module):
         elif size == 0:
             from transformers import AutoConfig
             self.outdim = 768
-            self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to('cuda')
+            self.convnet = AutoModel.from_config(config = AutoConfig.from_pretrained('google/vit-base-patch32-224-in21k')).to(self.device)
 
         if self.size == 0:
             self.normlayer = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
@@ -66,7 +66,7 @@ class R3M(nn.Module):
         if self.langweight > 0.0:
             ## Pretrained DistilBERT Sentence Encoder
             from r3m.models_language import LangEncoder, LanguageReward
-            self.lang_enc = LangEncoder(0, 0) 
+            self.lang_enc = LangEncoder(self.device, 0, 0) 
             self.lang_rew = LanguageReward(None, self.outdim, hidden_dim, self.lang_enc.lang_size, simfunc=self.sim) 
             params += list(self.lang_rew.parameters())
         ########################################################################
@@ -105,7 +105,7 @@ class R3M(nn.Module):
 
     def sim(self, tensor1, tensor2):
         if self.l2dist:
-            d = - torch.linalg.norm(tensor1 - tensor2, dim = -1) #torch.sqrt(((es1 - es0)**2).mean(-1))
+            d = - torch.linalg.norm(tensor1 - tensor2, dim = -1)
         else:
             d = self.cs(tensor1, tensor2)
         return d

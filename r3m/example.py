@@ -1,3 +1,7 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 import omegaconf
 import hydra
 import torch
@@ -7,7 +11,10 @@ from PIL import Image
 
 from r3m import load_r3m
 
-device = "cuda"
+if torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
 
 r3m = load_r3m("resnet50") # resnet18, resnet34
 r3m.eval()
