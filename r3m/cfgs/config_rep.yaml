@@ -22,10 +22,10 @@ lr: 1e-4
 # data
 alpha: 0.2
 dataset: "ego4d"
-wandbproject: drq_rep
-wandbuser: surajnfb
+wandbproject: 
+wandbuser: 
 doaug: "none"
-datapath: ""
+datapath: 
 
 agent:
   _target_: r3m.R3M
