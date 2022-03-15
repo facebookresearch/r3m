@@ -55,18 +55,18 @@ class Workspace:
         else:
             raise NameError('Invalid Dataset')
 
-        train_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "train", "train", 
+        train_iterable = R3MBuffer(self.cfg.num_workers, "train", "train", 
                                     alpha = self.cfg.alpha, datasources=sources, doaug = self.cfg.doaug, simclr = 0)
-        val_iterable = R3MBuffer(self.cfg.replay_buffer_num_workers, "val", "validation", 
+        val_iterable = R3MBuffer(self.cfg.num_workers, "val", "validation", 
                                     alpha = 0, datasources=sources, doaug = 0, simclr = 0)
 
         self.train_loader = iter(torch.utils.data.DataLoader(train_iterable,
                                          batch_size=self.cfg.batch_size,
-                                         num_workers=self.cfg.replay_buffer_num_workers,
+                                         num_workers=self.cfg.num_workers,
                                          pin_memory=True))
         self.val_loader = iter(torch.utils.data.DataLoader(val_iterable,
                                          batch_size=self.cfg.batch_size,
-                                         num_workers=self.cfg.replay_buffer_num_workers,
+                                         num_workers=self.cfg.num_workers,
                                          pin_memory=True))
 
 
