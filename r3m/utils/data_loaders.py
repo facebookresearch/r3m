@@ -28,10 +28,6 @@ import random
 
 
 def get_ind(vid, index, ds):
-    preprocess = torch.nn.Sequential(
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-        )
     if ds == "ego4d":
         return torchvision.io.read_image(f"{vid}/{index:06}.jpg")
     else:
@@ -40,12 +36,11 @@ def get_ind(vid, index, ds):
 
 ## Data Loader for Ego4D
 class R3MBuffer(IterableDataset):
-    def __init__(self, num_workers, source1, source2, alpha, datasources, doaug = "none", simclr=False):
+    def __init__(self, ego4dpath, num_workers, source1, source2, alpha, datasources, doaug = "none"):
         self._num_workers = max(1, num_workers)
         self.alpha = alpha
         self.curr_same = 0
         self.data_sources = datasources
-        self.simclr = simclr
         self.doaug = doaug
 
         # Augmentations
@@ -59,7 +54,7 @@ class R3MBuffer(IterableDataset):
         # Load Data
         if "ego4d" in self.data_sources:
             print("Ego4D")
-            self.manifest = pd.read_csv("/private/home/surajn/data/ego4d/manifest.csv")
+            self.manifest = pd.read_csv(f"{ego4dpath}manifest.csv")
             print(self.manifest)
             self.ego4dlen = len(self.manifest)
         else:

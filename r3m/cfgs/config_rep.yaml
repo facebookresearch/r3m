@@ -21,10 +21,11 @@ experiment: train_r3m
 lr: 1e-4
 # data
 alpha: 0.2
-dataset: "sthsth"
+dataset: "ego4d"
 wandbproject: drq_rep
 wandbuser: surajnfb
 doaug: "none"
+datapath: ""
 
 agent:
   _target_: r3m.R3M
