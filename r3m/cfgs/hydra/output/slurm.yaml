@@ -1,8 +1,8 @@
 # @package _global_
 hydra:
   run:
-    dir: /checkpoint/${env:USER}/drqoutput/${hydra.job.name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+    dir: /checkpoint/${env:USER}/r3moutput/${hydra.job.name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
     subdir: ${hydra.job.num}_${hydra.job.override_dirname}
   sweep:
-    dir: /checkpoint/${env:USER}/drqoutput/${hydra.job.name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+    dir: /checkpoint/${env:USER}/r3moutput/${hydra.job.name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
     subdir: ${hydra.job.num}_${hydra.job.override_dirname}
