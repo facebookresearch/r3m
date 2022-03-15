@@ -11,7 +11,6 @@ import torch
 import torchvision
 from termcolor import colored
 import wandb
-# from torch.utils.tensorboard import SummaryWriter
 
 COMMON_TRAIN_FORMAT = [('frame', 'F', 'int'), ('step', 'S', 'int'),
                        ('episode', 'E', 'int'), ('episode_length', 'L', 'int'),
@@ -136,7 +135,6 @@ class Logger(object):
         else:
             wandb.init(project=cfg.wandbproject, entity='surajnfb', name=cfg.experiment)
             fullcfg = {**cfg, **cfg.agent}
-            # wandb.config.update(cfg)
             wandb.config.update(fullcfg)
 
     def _try_sw_log(self, key, value, step):
