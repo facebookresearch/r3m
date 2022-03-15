@@ -19,10 +19,10 @@ import torch
 from torchvision import transforms
 from torch.utils.data import IterableDataset
 import pandas as pd
-from r3m import utils
+from r3m.utils import utils
 from r3m.trainer import Trainer
-from r3m.data_loaders import R3MBuffer
-from logger import Logger
+from r3m.utils.data_loaders import R3MBuffer
+from r3m.utils.logger import Logger
 import json
 import time
 import pickle
