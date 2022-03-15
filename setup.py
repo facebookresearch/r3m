@@ -1,3 +1,7 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 import os
 import sys
 from setuptools import setup, find_packages
@@ -13,9 +17,9 @@ setup(
     name='r3m',
     version='0.0.0',
     packages=find_packages(),
-    description='Pretrained Reusable Representations for Robot Manipulation',
+    description='R3M: Pretrained Reusable Representations for Robot Manipulation from Diverse Human Videos',
     long_description=read('README.md'),
-    author='Suraj Nair (FAIR)',
+    author='Suraj Nair (Meta AI)',
     install_requires=[
         'gdown==4.4.0', 
         'torch==1.7.1',
