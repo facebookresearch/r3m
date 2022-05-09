@@ -21,7 +21,7 @@ here https://github.com/vikashplus/mj_envs/blob/stable/mj_envs/envs/relay_kitche
 
 ## Installing R3M
 
-To use the R3M model, simply follow the installation process in the parent directory [here](https://github.com/facebookresearch/r3m).
+To use the R3M model, simply follow the installation process in the parent directory [here](https://github.com/facebookresearch/r3m/tree/eval).
 
 ## Downloading Demonstration Data
 
