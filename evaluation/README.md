@@ -25,7 +25,7 @@ To use the R3M model, simply follow the installation process in the parent direc
 
 ## Downloading Demonstration Data
 
-All demonstrations are located [here](https://drive.google.com/drive/folders/108VW5t5JV8uNtkWvfZxEvY2P2QkC_tsf?usp=sharing). Then change the path [here]() to point to where the demonstration data is located. Make sure the data is saved with the same folder structure as on the google drive, e.g. `<PATH TO DEMOS>/final_paths_multiview_meta_200/<CAMERA>/<TASK>.pickle`.
+All demonstrations are located [here](https://drive.google.com/drive/folders/108VW5t5JV8uNtkWvfZxEvY2P2QkC_tsf?usp=sharing). Then change the path [here](https://github.com/facebookresearch/r3m/blob/eval/evaluation/r3meval/core/train_loop.py#L99) to point to where the demonstration data is located. Make sure the data is saved with the same folder structure as on the google drive, e.g. `<PATH TO DEMOS>/final_paths_multiview_meta_200/<CAMERA>/<TASK>.pickle`.
 
 ## Install and Run Eval Code
 
