@@ -1,0 +1,56 @@
+default:
+    - override hydra/launcher: local
+    - override hydra/output: local
+
+# general inputs
+env               :   pen-v0
+pixel_based       :   True                    # pixel based (True) or state based (False) experiment
+embedding         :   resnet50                # choice of embedding network
+camera            :   vil_camera              # choice of camera to use for image generation
+device            :   cuda
+
+# experiment and evaluation
+seed              :   123                     # used as base_seed for rolling out policy for eval in sample_paths
+steps             :   20000                  # number of outer epochs
+eval_frequency    :   1000                       # frequency of epochs for evaluation and logging
+eval_num_traj     :   50                      # number of rollouts to eval
+num_cpu           :   1                       # for rolling out paths when evaluating                 
+num_demos         :   200                     # path to demo file auto-inferred from other inputs
+proprio           :   0
+
+# environment related kwargs
+env_kwargs:
+    env_name      :   ${env}                
+    device        :   ${device}               # device to use for representation network (policy clamped to CPU for now)
+    image_width   :   256
+    image_height  :   256
+    camera_name   :   ${camera}
+    embedding_name :  ${embedding}                
+    pixel_based   :   ${pixel_based}
+    render_gpu_id :   0                 
+    load_path     :   ""  
+    proprio       :   ${proprio}  
+    lang_cond     :   False
+    gc            :   False
+
+# demo reparsing arguments (states -> image embeddings)
+reparse_kwargs:
+    visualize     :   True                   # store videos (.mp4) of the trajectory while reparsing
+    save_frames   :   True                   # save the generated images in the trajectory (can increase storage space dramatically)
+
+# BC agent setup
+bc_kwargs:
+  loss_type       :   'MSE'
+  batch_size      :   32 #200
+  lr              :   1e-3
+  save_logs       :   False
+  finetune        :   False
+  proprio         :   ${proprio}  
+  proprio_only    :   False
+
+# general outputs
+job_name          :   'R3M'
+
+hydra:
+    job:
+        name: BC_pretrained_rep
