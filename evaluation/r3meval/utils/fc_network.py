@@ -45,8 +45,8 @@ class FCNetwork(nn.Module):
         self.out_scale = torch.from_numpy(np.float32(out_scale)) if out_scale is not None else torch.ones(self.act_dim)
 
     def forward(self, x):
-        # TODO(Aravind): Remove clamping to CPU
-        # This is a temp change that should be fixed shortly
+        # Small MLP runs on CPU
+        # Required for the way the Gaussian MLP class does weight saving and loading.
         if x.is_cuda:
             out = x.to('cpu')
         else:
