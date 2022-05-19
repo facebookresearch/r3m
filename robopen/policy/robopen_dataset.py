@@ -8,7 +8,7 @@ import torch
 import torchvision.transforms as T
 from PIL import Image
 
-from model import normalize, generate_embedding, initialize_r3m
+from model import normalize, generate_embedding, initialize_r3m, make_interpolater
 
 # Sampling params - v1
 RANDOM_GRASP_RANGE_UPPER_V1 = [0.7, -0.2, np.pi / 2]
@@ -17,8 +17,8 @@ RANDOM_RELEASE_RANGE_UPPER_V1 = [0.7, 0.2, np.pi / 2]
 RANDOM_RELEASE_RANGE_LOWER_V1 = [0.4, 0.1, -np.pi / 2]
 
 # Sampling params - v2
-RANDOM_GRASP_RANGE_UPPER_V2 = [0.75, -0.35, np.pi / 2]
-RANDOM_GRASP_RANGE_LOWER_V2 = [0.35, -0.05, -np.pi / 2]
+RANDOM_GRASP_RANGE_UPPER_V2 = [0.75, -0.05, np.pi / 2]
+RANDOM_GRASP_RANGE_LOWER_V2 = [0.35, -0.35, -np.pi / 2]
 RANDOM_RELEASE_RANGE_UPPER_V2 = [0.75, 0.35, np.pi / 2]
 RANDOM_RELEASE_RANGE_LOWER_V2 = [0.35, 0.05, -np.pi / 2]
 
@@ -27,43 +27,57 @@ TRAINING_DATASET_DIR = "/mnt/nfs2/giriman/data/policy/training_data/"
 def identity(x):
     return x
 
+# X: (0.35, 0.75) <-> (-1,1) Y: (-0.35, 0.35) <-> (-1,1) Z: (-pi/2, pi/2) <-> (-1,1)
+norm_scaler_x = make_interpolater(RANDOM_GRASP_RANGE_LOWER_V2[0], RANDOM_GRASP_RANGE_UPPER_V2[0], -1, 1)
+norm_scaler_y = make_interpolater(RANDOM_GRASP_RANGE_LOWER_V2[1], RANDOM_RELEASE_RANGE_UPPER_V2[1], -1, 1)
+norm_scaler_z = make_interpolater(RANDOM_GRASP_RANGE_LOWER_V2[2], RANDOM_GRASP_RANGE_UPPER_V2[2], -1, 1)
+denorm_scaler_x = make_interpolater(-1, 1, RANDOM_GRASP_RANGE_LOWER_V2[0], RANDOM_GRASP_RANGE_UPPER_V2[0])
+denorm_scaler_y = make_interpolater(-1, 1, RANDOM_GRASP_RANGE_LOWER_V2[1], RANDOM_RELEASE_RANGE_UPPER_V2[1])
+denorm_scaler_z = make_interpolater(-1, 1, RANDOM_GRASP_RANGE_LOWER_V2[2], RANDOM_GRASP_RANGE_UPPER_V2[2])
+
 def normalize_y_cartesian(y):
-    # [C,D] in our case is [-1,1]
-    dst_range = [-1, 1]
-    y_arr = y.numpy()
-    norm_y = [0, 0, 0]
-    if y_arr[1] < 0:
-        x_src_range = [RANDOM_GRASP_RANGE_LOWER_V2[0], RANDOM_GRASP_RANGE_UPPER_V2[0]]
-        y_src_range = [RANDOM_GRASP_RANGE_LOWER_V2[1], RANDOM_GRASP_RANGE_UPPER_V2[1]]
-        z_src_range = [RANDOM_GRASP_RANGE_LOWER_V2[2], RANDOM_GRASP_RANGE_UPPER_V2[2]]
-        norm_y[0] = normalize(v=y_arr[0], A=x_src_range[0], B=x_src_range[1], C=dst_range[0], D=dst_range[1])
-        norm_y[1] = normalize(v=y_arr[1], A=y_src_range[0], B=y_src_range[1], C=dst_range[0], D=dst_range[1])
-        norm_y[2] = normalize(v=y_arr[2], A=z_src_range[0], B=z_src_range[1], C=dst_range[0], D=dst_range[1])
+    if torch.is_tensor(y):
+        y_arr = y.tolist()
+    elif isinstance(y, (np.ndarray, np.generic)):
+        y_arr = y.tolist()
+    elif isinstance(y, list):        
+        y_arr = y
     else:
-        x_src_range = [RANDOM_RELEASE_RANGE_LOWER_V2[0], RANDOM_RELEASE_RANGE_UPPER_V2[0]]
-        y_src_range = [RANDOM_RELEASE_RANGE_LOWER_V2[1], RANDOM_RELEASE_RANGE_UPPER_V2[1]]
-        z_src_range = [RANDOM_RELEASE_RANGE_LOWER_V2[2], RANDOM_RELEASE_RANGE_UPPER_V2[2]]
-        norm_y[0] = normalize(v=y_arr[0], A=x_src_range[0], B=x_src_range[1], C=dst_range[0], D=dst_range[1])
-        norm_y[1] = normalize(v=y_arr[1], A=y_src_range[0], B=y_src_range[1], C=dst_range[0], D=dst_range[1])
-        norm_y[2] = normalize(v=y_arr[2], A=z_src_range[0], B=z_src_range[1], C=dst_range[0], D=dst_range[1])
-    for i in range(0,len(norm_y)):
-        if norm_y[i] < dst_range[0]:
-            norm_y[i] = dst_range[0]
-        if norm_y[i] > dst_range[1]:
-            norm_y[i] = dst_range[1]
-    return torch.flatten(torch.Tensor(norm_y))
+        raise Exception("unsupported input type")
+    norm_y = [0, 0, 0]
+    norm_y[0] = norm_scaler_x(y_arr[0])
+    norm_y[1] = norm_scaler_y(y_arr[1])
+    norm_y[2] = norm_scaler_z(y_arr[2])
+    return torch.flatten(torch.Tensor(norm_y))  
+
+def validate_y_normalized(y):
+    if torch.is_tensor(y):
+        y_arr = y.tolist()
+    elif isinstance(y, (np.ndarray, np.generic)):
+        y_arr = y.tolist()
+    elif isinstance(y, list):        
+        y_arr = y
+    else:
+        raise Exception("unsupported input type")
+    for y_a in y_arr:
+        if y_a < -1 or y_a > 1:
+            return False
+    return True    
 
 def denormalize_y_cartesian(y):
-    # [C,D] in our case is [-1,1]
-    src_range = [-1, 1]
-    x_dst_range = [0.75, 0.35]
-    y_dst_range = [-0.35, 0.35]
-    z_dst_range = [-np.pi / 2, np.pi / 2]
+    if torch.is_tensor(y):
+        y_arr = y.tolist()
+    elif isinstance(y, (np.ndarray, np.generic)):
+        y_arr = y.tolist()
+    elif isinstance(y, list):        
+        y_arr = y
+    else:
+        raise Exception("unsupported input type")
     norm_y = [0, 0, 0]
-    norm_y[0] = normalize(v=y[0], A=src_range[0], B=src_range[1], C=x_dst_range[0], D=x_dst_range[1])
-    norm_y[1] = normalize(v=y[1], A=src_range[0], B=src_range[1], C=y_dst_range[0], D=y_dst_range[1])
-    norm_y[2] = normalize(v=y[2], A=src_range[0], B=src_range[1], C=z_dst_range[0], D=z_dst_range[1]) 
-    return norm_y 
+    norm_y[0] = denorm_scaler_x(y_arr[0])
+    norm_y[1] = denorm_scaler_y(y_arr[1])
+    norm_y[2] = denorm_scaler_z(y_arr[2])
+    return torch.flatten(torch.Tensor(norm_y))     
 
 class GraspReleaseDataset():
     """
@@ -96,6 +110,7 @@ class GraspReleaseDataset():
         self.all_y_cartesian_grasp_normalized = []
         self.all_y_cartesian_release_normalized = []
 
+
     def validate_dataset(self):
         l1 = len(self.img_grasp_embeddings["identity"])
         l2 = len(self.img_release_embeddings["identity"])
@@ -123,11 +138,33 @@ class GraspReleaseDataset():
             self.img_grasp_embeddings = dataset['grasps']['embeddings']
             self.y_cartesian_grasp = dataset['grasps']['cartesian_locations']     
             self.img_release_embeddings = dataset['releases']['embeddings']
-            self.y_cartesian_release = dataset['releases']['cartesian_locations']   
-            for y in self.y_cartesian_grasp:
-                self.y_cartesian_grasp_normalized.append(normalize_y_cartesian(y))
-            for y in self.y_cartesian_release:
-                self.y_cartesian_release_normalized.append(normalize_y_cartesian(y))
+            self.y_cartesian_release = dataset['releases']['cartesian_locations'] 
+            bad_grasp_samples = []  
+            for i in range(len(self.y_cartesian_grasp)):
+                norm_y = normalize_y_cartesian(self.y_cartesian_grasp[i])
+                if validate_y_normalized(norm_y):
+                    self.y_cartesian_grasp_normalized.append(norm_y)
+                else:
+                    bad_grasp_samples.append(i)
+            bad_release_samples = []                  
+            for i in range(len(self.y_cartesian_release)):
+                norm_y = normalize_y_cartesian(self.y_cartesian_release[i])
+                if validate_y_normalized(norm_y):
+                    self.y_cartesian_release_normalized.append(norm_y)
+                else:
+                    bad_release_samples.append(i)
+            for index in sorted(bad_grasp_samples, reverse=True):
+                del self.y_cartesian_grasp[index]
+                for _, v in self.img_grasp_embeddings.items():
+                    if len(v) > 0:
+                        del v[index]
+
+            for index in sorted(bad_release_samples, reverse=True):
+                del self.y_cartesian_release[index]
+                for _, v in self.img_release_embeddings.items():
+                    if len(v) > 0:
+                        del v[index]
+
             for _, v in self.img_grasp_embeddings.items():
                 if len(v) > 0:
                     self.all_img_grasp_embeddings = self.all_img_grasp_embeddings + v

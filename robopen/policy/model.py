@@ -40,6 +40,20 @@ def normalize(v, A, B, C, D):
     # y = (X-A)/(B-A) * (D-C) + C
     return (v - A) / (B - A) * (D - C) + C
 
+def make_interpolater(left_min, left_max, right_min, right_max): 
+    # Figure out how 'wide' each range is  
+    leftSpan = left_max - left_min  
+    rightSpan = right_max - right_min  
+
+    # Compute the scale factor between left and right values 
+    scaleFactor = float(rightSpan) / float(leftSpan) 
+
+    # create interpolation function using pre-calculated scaleFactor
+    def interp_fn(value):
+        return right_min + (value-left_min)*scaleFactor
+
+    return interp_fn
+    
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform(m.weight)

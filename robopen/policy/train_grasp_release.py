@@ -154,13 +154,12 @@ def plot_loss_curves(train_stats, robopen_id, dir_name):
     ax.set_xlabel("epoch")
     ax.set_ylabel("loss")  
     mod_title = title.replace(" ", "_")   
-    os.makedirs(dir_name, exist_ok=True)
     file_name = f"loss_stats_{mod_title.upper()}.png"
     save_figure(fig, robopen_id, dir_name, file_name)
     plt.close(fig)    
 
 def inference(model, hyperparameters, dataset, device="cpu"):
-    mbs = min(hyperparameters.mini_batch_size, len(dataset))
+    mbs = 1 # min(hyperparameters.mini_batch_size, len(dataset))
     data_loader = torch.utils.data.DataLoader(dataset, 
         batch_size=mbs, 
         shuffle=True, num_workers=1, drop_last=True)  
@@ -182,7 +181,7 @@ def inference(model, hyperparameters, dataset, device="cpu"):
             all_predictions_norm = all_predictions_norm + \
                     [x.tolist() for x in predicted_outputs]
             all_predictions = all_predictions + \
-                    [denormalize_y_cartesian(x.tolist()) for x in predicted_outputs]
+                    [denormalize_y_cartesian(x).tolist() for x in predicted_outputs]
     return ((loss / (len(dataset) / mbs)), 
             all_targets,
             all_targets_norm, 
@@ -266,7 +265,7 @@ def train(model, device, train_dataset,
             all_targets_norm = all_targets_norm + [x.tolist() for x in targets_norm]
             all_targets = all_targets + [x.tolist() for x in targets]
             all_outputs_norm = all_outputs_norm + [x.tolist() for x in outputs]
-            all_outputs = all_outputs + [denormalize_y_cartesian(x.tolist()) for x in outputs]
+            all_outputs = all_outputs + [denormalize_y_cartesian(x).tolist() for x in outputs]
         e_stats["epoch"] = epoch
         e_stats["samples_seen"] = samples_seen
         e_stats["average_training_loss"] = round(avg_training_loss, 4)
