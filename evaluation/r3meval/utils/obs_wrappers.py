@@ -164,6 +164,9 @@ class StateEmbedding(gym.ObservationWrapper):
         else:
             # returns the state based observations
             return self.env.unwrapped.get_obs()
+          
+    def start_finetuning(self):
+        self.start_finetune = True
 
 
 class MuJoCoPixelObs(gym.ObservationWrapper):

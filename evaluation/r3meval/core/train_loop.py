@@ -137,7 +137,7 @@ def bc_train_loop(job_data:dict) -> None:
         if (job_data['bc_kwargs']['finetune']) and (job_data['pixel_based']) and (job_data['env_kwargs']['load_path'] != "clip"):
             if last_step > (job_data['steps'] / 4.0):
                 e.env.embedding.train()
-                e.env.embedding.start_finetune = True
+                e.env.start_finetuning()
         agent.train(job_data['pixel_based'], suppress_fit_tqdm=True, step = last_step)
         
         # perform evaluation rollouts every few epochs
