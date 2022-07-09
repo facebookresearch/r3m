@@ -12,7 +12,7 @@ For metaworld environments, install the environments by cloning this [fork of th
 
 In order to install the Franka Kitchen and Adroit environments, first install the `mjrl` repo using instructions [here](https://github.com/aravindr93/mjrl).
 
-Then, install the `mj_envs` repo as described in [this tag](https://github.com/vikashplus/mj_envs/releases/tag/v0.0.5)
+Then, install the `mj_envs` repo as described in [this tag](https://github.com/vikashplus/mj_envs/releases/tag/v0.0.5).
 
 ## Installing R3M
 
