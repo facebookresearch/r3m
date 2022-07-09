@@ -11,13 +11,8 @@ The first step to running the code involves installing the evaluation environmen
 For metaworld environments, install the environments by cloning this [fork of the metaworld repo](https://github.com/suraj-nair-1/metaworld) and installing via `pip install -e .`
 
 In order to install the Franka Kitchen and Adroit environments, first install the `mjrl` repo using instructions [here](https://github.com/aravindr93/mjrl).
-Then install the stable branch of the `mj_envs` repo [here](https://github.com/vikashplus/mj_envs/tree/stable). 
 
-In order to match the R3M experiments where the Franka Kitchen is randomized in space, be sure to add the line 
-```
-FIXED_ENTRY_POINT = RANDOM_DESK_ENTRY_POINT
-```
-here https://github.com/vikashplus/mj_envs/blob/stable/mj_envs/envs/relay_kitchen/__init__.py#L160. This changes the default behavior of the environment from a fixed kitchen ot one where the kitchen moves around in, making the task more visually challenging.
+Then, install the `mj_envs` repo as described in [this tag](https://github.com/vikashplus/mj_envs/releases/tag/v0.0.5)
 
 ## Installing R3M
 
