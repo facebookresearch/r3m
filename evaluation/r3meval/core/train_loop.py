@@ -155,7 +155,7 @@ def bc_train_loop(job_data:dict) -> None:
                 for i, path in enumerate(paths):
                     if (i < 10) and job_data['pixel_based']:
                         vid = path['images']
-                        filename = f'./iterations/vid_{i}.gif'
+                        filename = f'./iterations/vid_{agent.steps}_{i}.gif'
                         from moviepy.editor import ImageSequenceClip
                         cl = ImageSequenceClip(vid, fps=20)
                         cl.write_gif(filename, fps=20)
@@ -166,7 +166,7 @@ def bc_train_loop(job_data:dict) -> None:
                     sc.append(path['env_infos']['success'][-1])
                     if (i < 10) and job_data['pixel_based']:
                         vid = path['images']
-                        filename = f'./iterations/vid_{i}.gif'
+                        filename = f'./iterations/vid_{agent.steps}_{i}.gif'
                         from moviepy.editor import ImageSequenceClip
                         cl = ImageSequenceClip(vid, fps=20)
                         cl.write_gif(filename, fps=20)
