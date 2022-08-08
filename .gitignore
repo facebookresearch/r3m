@@ -3,3 +3,6 @@ __pycache__/
 .nfs*
 *.ipynb*
 *.egg*
+dataset/
+evaluation/R3M
+job_config.json

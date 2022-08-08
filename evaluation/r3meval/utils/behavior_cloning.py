@@ -42,14 +42,14 @@ class BC:
         self.finetune = finetune
         self.proprio = proprio
         self.steps = 0
-
+        
         if set_transforms:
             in_shift, in_scale, out_shift, out_scale = self.compute_transformations()
             self.set_transformations(in_shift, in_scale, out_shift, out_scale)
             self.set_variance_with_data(out_scale)
 
         # construct optimizer
-        self.optimizer = torch.optim.Adam(list(self.policy.trainable_params) + list(encoder_params), lr=lr) if optimizer is None else optimizer
+        self.optimizer = torch.optim.Adam(list(self.policy.trainable_params) + list(encoder_params), lr=float(lr)) if optimizer is None else optimizer
 
         # Loss criterion if required
         if loss_type == 'MSE':

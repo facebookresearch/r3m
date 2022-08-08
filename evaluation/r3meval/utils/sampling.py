@@ -76,6 +76,7 @@ def do_rollout(
     paths = []
 
     ep = 0
+    # breakpoint()
     while ep < num_traj:
         # seeding
         if base_seed is not None:
@@ -107,7 +108,6 @@ def do_rollout(
             init_state = env.__getstate__()
         except:
             init_state = env.get_env_state()
-
         while t < horizon and done != True:
             a, agent_info = policy.get_action(o)
             if eval_mode:
@@ -140,7 +140,7 @@ def do_rollout(
 
         paths.append(path)
         ep += 1
-            
+    # breakpoint()        
     del(env)
     gc.collect()
     return paths

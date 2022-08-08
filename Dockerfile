@@ -159,11 +159,18 @@ RUN cd / && \
     cd metaworld && \
     source /root/.bash_profile && \
     sed -i -e 's/mujoco-py<2.1,>=2.0/mujoco-py/' setup.py && \
+    pip install -e . && \ 
+    cd / && \
+    git clone https://github.com/vikashplus/mj_envs.git && \
+    cd mj_envs && \
+    source /root/.bash_profile && \
+    sed -i -e 's/gym==0.13/gym/' setup.py && \
+    sed -i -e 's/mujoco-py<2.1,>=2.0/mujoco-py/' setup.py && \
     pip install -e .
 
-WORKDIR /root/workspace/dataset
-RUN wget https://drive.google.com/drive/folders/108VW5t5JV8uNtkWvfZxEvY2P2QkC_tsf?usp=sharing
-
+# WORKDIR /root/workspace/dataset/final_paths_multiview_meta_200/left_cap2
+# RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1237SZJY24IWpqEUZ4qMQOXaccciMg9Ze' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1237SZJY24IWpqEUZ4qMQOXaccciMg9Ze" -O drawer-open-v2-goal-observable.pickle && rm -rf /tmp/cookies.txt
+# https://drive.google.com/file/d/1237SZJY24IWpqEUZ4qMQOXaccciMg9Ze/view?usp=sharing
 WORKDIR /root/workspace/
 RUN source ~/.bash_profile && source ~/.bashrc
 CMD ["/bin/bash", "-c", "source ~/.bash_profile && bash"]

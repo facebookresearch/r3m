@@ -17,6 +17,6 @@ setup(
     name='r3meval',
     description='Policy learning from pixels using pre-trained representations, used in the R3M paper',
     install_requires=[
-        'pip', 'click', 'gym==0.20.0', 'termcolor', 'mjrl', 'mj_envs', 'tabulate', 'scipy', 'transforms3d', 'moviepy'
+        'pip', 'click', 'gym==0.20.0', 'termcolor', 'mjrl @ git+https://github.com/aravindr93/mjrl@master#egg=mjrl', 'mj_envs', 'tabulate', 'scipy', 'transforms3d', 'moviepy'
     ],
 )

@@ -96,7 +96,7 @@ def bc_train_loop(job_data:dict) -> None:
 
     # Infers the location of the demos
     ## V2 is metaworld, V0 adroit, V3 kitchen
-    data_dir = '/iris/u/surajn/data/r3m/'
+    data_dir = '/root/workspace/dataset/'
     if "v2" in job_data['env_kwargs']['env_name']:
         demo_paths_loc = data_dir + 'final_paths_multiview_meta_200/' + job_data['camera'] + '/' + job_data['env_kwargs']['env_name'] + '.pickle'
     elif "v0" in job_data['env_kwargs']['env_name']:
@@ -139,7 +139,6 @@ def bc_train_loop(job_data:dict) -> None:
                 e.env.embedding.train()
                 e.env.start_finetuning()
         agent.train(job_data['pixel_based'], suppress_fit_tqdm=True, step = last_step)
-        
         # perform evaluation rollouts every few epochs
         if ((agent.steps % job_data['eval_frequency']) < (last_step % job_data['eval_frequency'])):
             agent.policy.model.eval()
@@ -149,7 +148,7 @@ def bc_train_loop(job_data:dict) -> None:
                                  policy=agent.policy, eval_mode=True, horizon=e.horizon, 
                                  base_seed=job_data['seed']+epoch, num_cpu=job_data['num_cpu'], 
                                  env_kwargs=env_kwargs)
-            
+            # breakpoint()
             try:
                 ## Success computation and logging for Adroit and Kitchen
                 success_percentage = e.env.unwrapped.evaluate_success(paths)
