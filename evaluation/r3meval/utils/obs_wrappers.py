@@ -183,6 +183,8 @@ class MuJoCoPixelObs(gym.ObservationWrapper):
 
     def get_image(self):
         if self.camera_name == "default":
+            print("Camera not supported")
+            assert(False)
             img = self.sim.render(width=self.width, height=self.height, depth=self.depth,
                             device_id=self.device_id)
         else:
